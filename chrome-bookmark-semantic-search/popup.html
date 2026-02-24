@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="utf-8">
   <title>智能书签搜索</title>
@@ -13,17 +14,17 @@
       color: white;
       margin: 0;
     }
-    
+
     .header {
       text-align: center;
       margin-bottom: 20px;
     }
-    
+
     .search-container {
       position: relative;
       margin-bottom: 20px;
     }
-    
+
     .search-input {
       width: 100%;
       padding: 12px 40px 12px 16px;
@@ -35,7 +36,7 @@
       color: #333;
       box-sizing: border-box;
     }
-    
+
     .search-button {
       position: absolute;
       right: 8px;
@@ -52,19 +53,19 @@
       align-items: center;
       justify-content: center;
     }
-    
+
     .status {
       text-align: center;
       margin: 10px 0;
       font-size: 14px;
       opacity: 0.8;
     }
-    
+
     .results {
       max-height: 350px;
       overflow-y: auto;
     }
-    
+
     .bookmark-item {
       background: rgba(255, 255, 255, 0.1);
       margin: 8px 0;
@@ -74,57 +75,59 @@
       transition: all 0.2s ease;
       border-left: 4px solid transparent;
     }
-    
+
     .bookmark-item:hover {
       background: rgba(255, 255, 255, 0.2);
       border-left-color: #ffd700;
     }
-    
+
     .bookmark-title {
       font-weight: 600;
       margin-bottom: 4px;
       font-size: 14px;
       line-height: 1.3;
     }
-    
+
     .bookmark-url {
       font-size: 12px;
       opacity: 0.7;
       margin-bottom: 4px;
       word-break: break-all;
     }
-    
+
     .bookmark-similarity {
       font-size: 11px;
       opacity: 0.6;
       text-align: right;
     }
-    
+
     .loading {
       text-align: center;
       padding: 20px;
     }
-    
+
     .spinner {
       display: inline-block;
       width: 20px;
       height: 20px;
-      border: 2px solid rgba(255,255,255,0.3);
+      border: 2px solid rgba(255, 255, 255, 0.3);
       border-radius: 50%;
       border-top-color: white;
       animation: spin 1s ease-in-out infinite;
     }
-    
+
     @keyframes spin {
-      to { transform: rotate(360deg); }
+      to {
+        transform: rotate(360deg);
+      }
     }
-    
+
     .no-results {
       text-align: center;
       padding: 40px 20px;
       opacity: 0.6;
     }
-    
+
     .init-status {
       text-align: center;
       padding: 20px;
@@ -132,7 +135,7 @@
       border-radius: 8px;
       margin: 10px 0;
     }
-    
+
     .progress-bar {
       width: 100%;
       height: 4px;
@@ -141,7 +144,7 @@
       margin: 10px 0;
       overflow: hidden;
     }
-    
+
     .progress-fill {
       height: 100%;
       background: #ffd700;
@@ -150,20 +153,33 @@
     }
   </style>
 </head>
+
 <body>
   <div class="header">
     <h1>🔍 智能书签搜索</h1>
   </div>
-  
+
   <div class="search-container">
     <input type="text" class="search-input" id="searchInput" placeholder="试试：关于日语语法学习的书签">
     <button class="search-button" id="searchButton">
       <span>🔍</span>
     </button>
   </div>
-  
+
+  <div class="actions-container"
+    style="text-align: center; margin-bottom: 10px; display: flex; gap: 8px; justify-content: center;">
+    <button id="autoCategorizeBtn"
+      style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 6px 12px; border-radius: 15px; cursor: pointer; transition: all 0.3s; font-size: 13px;">
+      ✨ 智能整理无分类
+    </button>
+    <button id="openDashboardBtn"
+      style="background: #1d9bf0; border: none; color: white; padding: 6px 12px; border-radius: 15px; cursor: pointer; transition: all 0.3s; font-size: 13px; font-weight: bold;">
+      🌍 控制面板 & 推特同步
+    </button>
+  </div>
+
   <div class="status" id="status">准备就绪</div>
-  
+
   <div class="init-status" id="initStatus" style="display: none;">
     <div>正在初始化语义搜索模型...</div>
     <div class="progress-bar">
@@ -171,9 +187,10 @@
     </div>
     <div id="progressText">0%</div>
   </div>
-  
+
   <div class="results" id="results"></div>
 
   <script src="popup.js"></script>
 </body>
+
 </html>

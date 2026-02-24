@@ -8,11 +8,14 @@ class BookmarkSearchUI {
     this.results = document.getElementById('results');
     this.initStatus = document.getElementById('initStatus');
     this.progressFill = document.getElementById('progressFill');
+    this.initStatus = document.getElementById('initStatus');
+    this.progressFill = document.getElementById('progressFill');
     this.progressText = document.getElementById('progressText');
-    
+    this.autoCategorizeBtn = document.getElementById('autoCategorizeBtn');
+
     this.isSearching = false;
     this.isInitialized = false;
-    
+
     this.init();
   }
 
@@ -24,7 +27,20 @@ class BookmarkSearchUI {
   setupEventListeners() {
     // 搜索按钮点击
     this.searchButton.addEventListener('click', () => this.performSearch());
-    
+
+    // 自动分类按钮点击
+    if (this.autoCategorizeBtn) {
+      this.autoCategorizeBtn.addEventListener('click', () => this.performAutoCategorize());
+    }
+
+    // 打开控制面板
+    const openDashboardBtn = document.getElementById('openDashboardBtn');
+    if (openDashboardBtn) {
+      openDashboardBtn.addEventListener('click', () => {
+        chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html') });
+      });
+    }
+
     // 输入框回车搜索
     this.searchInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter' && !this.isSearching) {
@@ -37,7 +53,7 @@ class BookmarkSearchUI {
     this.searchInput.addEventListener('input', (e) => {
       clearTimeout(searchTimeout);
       const query = e.target.value.trim();
-      
+
       if (query.length >= 2) {
         searchTimeout = setTimeout(() => {
           this.performSearch();
@@ -53,7 +69,7 @@ class BookmarkSearchUI {
   async checkInitializationStatus() {
     try {
       const response = await this.sendMessage({ type: 'GET_INIT_STATUS' });
-      
+
       if (response.success) {
         if (response.isInitialized) {
           this.isInitialized = true;
@@ -77,15 +93,20 @@ class BookmarkSearchUI {
   async initializeEngine() {
     this.showInitProgress();
     this.updateStatus('正在初始化语义搜索引擎...');
-    
+
     try {
       const response = await this.sendMessage({ type: 'INITIALIZE_ENGINE' });
-      
+
       if (response.success) {
-        this.isInitialized = true;
-        this.hideInitProgress();
-        this.updateStatus('就绪 - 输入关键词开始搜索');
-        this.searchInput.focus();
+        if (response.isAsync) {
+          // 接管进入轮询模式
+          this.startProgressPolling();
+        } else {
+          this.isInitialized = true;
+          this.hideInitProgress();
+          this.updateStatus('就绪 - 输入关键词开始搜索');
+          this.searchInput.focus();
+        }
       } else {
         throw new Error(response.error || '初始化失败');
       }
@@ -112,11 +133,11 @@ class BookmarkSearchUI {
   }
 
   displayOngoingProgress(progressInfo) {
-    const percentage = progressInfo.total > 0 ? 
+    const percentage = progressInfo.total > 0 ?
       (progressInfo.current / progressInfo.total) * 100 : 0;
-    
+
     this.updateInitProgress(percentage);
-    
+
     let statusText = '';
     switch (progressInfo.status) {
       case 'initializing':
@@ -137,7 +158,7 @@ class BookmarkSearchUI {
       default:
         statusText = '准备中...';
     }
-    
+
     this.updateStatus(statusText);
   }
 
@@ -145,11 +166,11 @@ class BookmarkSearchUI {
     this.progressPollingInterval = setInterval(async () => {
       try {
         const response = await this.sendMessage({ type: 'GET_INIT_PROGRESS' });
-        
+
         if (response.success) {
           const progress = response.progress;
           this.displayOngoingProgress(progress);
-          
+
           if (progress.status === 'completed') {
             this.isInitialized = true;
             this.hideInitProgress();
@@ -178,7 +199,7 @@ class BookmarkSearchUI {
 
   async performSearch() {
     const query = this.searchInput.value.trim();
-    
+
     if (!query) {
       this.clearResults();
       return;
@@ -236,11 +257,11 @@ class BookmarkSearchUI {
   createBookmarkElement(bookmark) {
     const div = document.createElement('div');
     div.className = 'bookmark-item';
-    
+
     // 格式化相似度分数（兼容 score 和 similarity 字段）
     const similarity = bookmark.score || bookmark.similarity || 0;
     const similarityPercent = Math.round(similarity * 100);
-    
+
     div.innerHTML = `
       <div class="bookmark-title">${this.escapeHtml(bookmark.title || '无标题')}</div>
       <div class="bookmark-url">${this.escapeHtml(bookmark.url)}</div>
@@ -254,6 +275,110 @@ class BookmarkSearchUI {
     });
 
     return div;
+  }
+
+  async performAutoCategorize() {
+    if (!this.isInitialized) {
+      this.updateStatus('正在初始化，请稍候...');
+      return;
+    }
+
+    if (this.isSearching) return;
+    this.isSearching = true;
+
+    this.updateStatus('大脑飞速运转中，正在计算质心与意图...');
+    this.showLoading();
+
+    try {
+      const response = await this.sendMessage({ type: 'AUTO_CATEGORIZE' });
+
+      if (response.success) {
+        if (!response.suggestions || response.suggestions.length === 0) {
+          this.showNoResults('目前没有找到适合被自动整理的书签');
+          this.updateStatus('无需整理');
+        } else {
+          this.displayAutoCategorizeResults(response.suggestions);
+          this.updateStatus(`发现 ${response.suggestions.length} 个可以智能整理的书签`);
+        }
+      } else {
+        throw new Error(response.msg || response.error || '分类失败');
+      }
+    } catch (error) {
+      console.error('自动分类失败:', error);
+      this.updateStatus('分类失败: ' + error.message);
+      this.showError('分类失败，请重试或者检查权限');
+    } finally {
+      this.isSearching = false;
+    }
+  }
+
+  displayAutoCategorizeResults(suggestions) {
+    this.results.innerHTML = '';
+
+    // Add banner
+    const banner = document.createElement('div');
+    banner.style = "margin-bottom: 15px; font-size: 13px; opacity: 0.9; text-align: center; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px;";
+    banner.innerText = "自动找到以下书签的最佳归属，点击「移动」确认：";
+    this.results.appendChild(banner);
+
+    suggestions.forEach(suggestion => {
+      const div = document.createElement('div');
+      div.className = 'bookmark-item';
+      div.style.cursor = 'default';
+
+      const similarityPercent = Math.round(suggestion.confidence * 100);
+
+      div.innerHTML = `
+        <div class="bookmark-title">${this.escapeHtml(suggestion.bookmark.title || '无标题')}</div>
+        <div class="bookmark-url" style="margin-bottom: 8px;">${this.escapeHtml(suggestion.bookmark.url)}</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed rgba(255,255,255,0.2); padding-top: 8px; margin-top: 4px;">
+          <div style="font-size: 11px; color: #ffd700; max-width: 80%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            建议移动至 📁 <b>${this.escapeHtml(suggestion.suggestedFolder)}</b> (${similarityPercent}%)
+          </div>
+          <button class="move-btn" style="background: #4caf50; border: none; color: white; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; transition: all 0.2s;">移动</button>
+        </div>
+      `;
+
+      const moveBtn = div.querySelector('.move-btn');
+      moveBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+
+        moveBtn.innerText = '移动中...';
+        moveBtn.disabled = true;
+        moveBtn.style.opacity = '0.5';
+
+        try {
+          // Send move message 
+          const res = await this.sendMessage({
+            type: 'MOVE_BOOKMARK',
+            bookmarkId: suggestion.bookmark.id,
+            parentId: suggestion.suggestedFolderId
+          });
+
+          if (res.success) {
+            moveBtn.innerText = '已移动 ✓';
+            moveBtn.style.background = 'transparent';
+            moveBtn.style.border = '1px solid #4caf50';
+            moveBtn.style.color = '#4caf50';
+            moveBtn.style.opacity = '1';
+
+            setTimeout(() => {
+              div.style.opacity = '0';
+              setTimeout(() => { div.style.display = 'none'; }, 300);
+            }, 1000);
+          } else {
+            throw new Error(res.error || 'API 失败');
+          }
+        } catch (err) {
+          moveBtn.innerText = '失败 ×';
+          moveBtn.style.background = '#f44336';
+          moveBtn.style.opacity = '1';
+          console.error('移动失败', err);
+        }
+      });
+
+      this.results.appendChild(div);
+    });
   }
 
   showLoading() {

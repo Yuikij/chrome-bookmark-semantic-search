@@ -178,6 +178,22 @@
     </button>
   </div>
 
+  <div id="twitterActionsSection"
+    style="display: none; background: rgba(0,0,0,0.2); border-radius: 10px; padding: 12px; margin-bottom: 15px;">
+    <div style="font-size: 12px; opacity: 0.8; margin-bottom: 8px; text-align: center;">🐦 探测到 X书签页，可提取数据到知识库</div>
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <button id="twBtnCurrent"
+        style="background: rgba(29, 155, 240, 0.9); color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s;">📥
+        提取当前屏幕</button>
+      <button id="twBtnIncrem"
+        style="background: rgba(16, 185, 129, 0.9); color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s;">🚀
+        增量滚屏抓取 (追平即停)</button>
+      <button id="twBtnDeep"
+        style="background: rgba(139, 92, 246, 0.9); color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s;">🌋
+        深度全量滚屏 (强制到底)</button>
+    </div>
+  </div>
+
   <div class="status" id="status">准备就绪</div>
 
   <div class="init-status" id="initStatus" style="display: none;">

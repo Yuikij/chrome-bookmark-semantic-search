@@ -612,83 +612,53 @@ class SemanticSearchEngine {
     return { success: true, suggestions };
   }
 
-  // --- 持久化推特虚拟文件夹 ---
-  async saveTwitterFolders(folders) {
-    // folders = { folderName: [bookmarkId, ...], ... }
-    try {
-      console.log('📝 [TwitterFolders] 正在保存:', JSON.stringify(Object.keys(folders)));
-      const db = await this.openDatabase();
-      if (!db.objectStoreNames.contains('twitterFolders')) {
-        console.error('❌ [TwitterFolders] store 不存在！DB version:', db.version, 'stores:', Array.from(db.objectStoreNames));
-        // 关闭旧连接，下次重连触发升级
-        db.close();
-        this.dbPromise = null;
-        const db2 = await this.openDatabase();
-        await this.idbReq(
-          db2.transaction(['twitterFolders'], 'readwrite')
-            .objectStore('twitterFolders')
-            .put(folders, 'userFolders')
-        );
-      } else {
-        await this.idbReq(
-          db.transaction(['twitterFolders'], 'readwrite')
-            .objectStore('twitterFolders')
-            .put(folders, 'userFolders')
-        );
-      }
-      console.log('✅ [TwitterFolders] 保存成功, 文件夹数:', Object.keys(folders).length);
-    } catch (e) {
-      console.error('❌ [TwitterFolders] 保存失败:', e);
-    }
-  }
-
-  async loadTwitterFolders() {
-    try {
-      const db = await this.openDatabase();
-      if (!db.objectStoreNames.contains('twitterFolders')) {
-        console.warn('⚠️ [TwitterFolders] store 不存在，返回空对象');
-        db.close();
-        this.dbPromise = null;
-        return {};
-      }
-      const folders = await this.idbReq(
-        db.transaction(['twitterFolders'], 'readonly')
-          .objectStore('twitterFolders')
-          .get('userFolders')
-      );
-      console.log('✅ [TwitterFolders] 加载成功, 文件夹:', folders ? Object.keys(folders) : '(空)');
-      return folders || {};
-    } catch (e) {
-      console.error('❌ [TwitterFolders] 加载失败:', e);
-      return {};
-    }
-  }
-
-  // --- 高精度聚类推特书签 (尊重用户已固定的文件夹) ---
+  // --- 高精度聚类推特书签 (依赖 Chrome 真实书签结构) ---
   async clusterTwitterBookmarks() {
     await this.ensureInitialized();
 
     const all = await this.getAllBookmarks();
     const xBookmarks = all.filter(bm => bm.title && bm.title.includes('[X推文]'));
 
-    if (xBookmarks.length === 0) return { folders: {}, userFolders: {} };
+    if (xBookmarks.length === 0) return { userFolders: {}, autoClusters: {} };
 
-    // 加载用户已固定的文件夹分配
-    const userFolders = await this.loadTwitterFolders();
-    // userFolders = { folderName: [bookmarkId, ...] }
-
-    // 收集所有已被用户固定的 bookmark IDs
+    // 探测当前推特书签目录结构 (直接从书签树里读！)
+    const userFolders = {}; // { folderName: [bookmarkId, ...] }
+    const unclassifiedIds = new Set();
     const pinnedIds = new Set();
-    for (const ids of Object.values(userFolders)) {
-      for (const id of ids) pinnedIds.add(id);
+
+    for (const bm of xBookmarks) {
+      if (!bm.folderPath) {
+        unclassifiedIds.add(bm.id);
+        continue;
+      }
+
+      const parts = bm.folderPath.split(' > ');
+      const txIndex = parts.indexOf('🐦 Twitter/X 书签');
+
+      if (txIndex === -1 && parts.length > 0) {
+        // 放到了主库的别的普通文件夹里
+        const parentName = parts[parts.length - 1];
+        if (!userFolders[parentName]) userFolders[parentName] = [];
+        userFolders[parentName].push(bm.id);
+        pinnedIds.add(bm.id);
+      } else if (txIndex === parts.length - 1) {
+        // 直接在 🐦 Twitter/X 书签 根目录下
+        unclassifiedIds.add(bm.id);
+      } else {
+        // 在 🐦 Twitter/X 书签 下的子文件夹中
+        const folderName = parts[txIndex + 1];
+        if (!userFolders[folderName]) userFolders[folderName] = [];
+        userFolders[folderName].push(bm.id);
+        pinnedIds.add(bm.id);
+      }
     }
 
     const mediaBookmarks = [];
     const validData = [];
 
-    // 1. 过滤和分离纯多媒体推文，并排除已被用户固定的
+    // 1. 过滤和分离纯多媒体推文，并排除已经在某个分类里的
     for (const bm of xBookmarks) {
-      if (pinnedIds.has(bm.id)) continue; // 已被用户分配，不再参与自动聚类
+      if (pinnedIds.has(bm.id)) continue;
 
       const match = bm.title.match(/\[X推文\]\s*(.*?):\s*(.*)/);
       let text = bm.title;
@@ -706,17 +676,17 @@ class SemanticSearchEngine {
         mediaBookmarks.push(bm);
       }
     }
-    // 1.5 用户文件夹语义吸引（双模式）
-    // 模式A: 空文件夹 → 用文件夹名嵌入吸引（阈值低，适合精确名称）
-    // 模式B: 有内容的文件夹 → 用已有推文的向量质心吸引（阈值高，适合概括性名称如"AI学习"）
-    const NAME_ATTRACT_THRESHOLD = 0.68;     // 文件夹名 vs 推文
-    const CENTROID_ATTRACT_THRESHOLD = 0.75;  // 质心 vs 推文（更精准）
+
+    const autoClusters = {}; // 承载智能生成的草稿
+
+    // 1.5 用户文件夹语义吸引
+    const NAME_ATTRACT_THRESHOLD = 0.68;
+    const CENTROID_ATTRACT_THRESHOLD = 0.75;
     const folderNames = Object.keys(userFolders);
     if (folderNames.length > 0 && validData.length > 0) {
       console.log('🧲 [FolderAttract] 开始处理', folderNames.length, '个用户文件夹...');
 
-      // 为每个文件夹构建吸引向量：有推文的用质心，空的用名称嵌入
-      const folderVectors = []; // { name, vector, mode, threshold }
+      const folderVectors = [];
       const emptyFolderNames = [];
       const emptyFolderIndices = [];
 
@@ -724,7 +694,6 @@ class SemanticSearchEngine {
         const name = folderNames[fi];
         const ids = userFolders[name];
         if (ids && ids.length > 0) {
-          // 模式B: 计算已有推文的向量质心
           const vectors = ids.map(id => this.embeddings.get(id)).filter(Boolean);
           if (vectors.length > 0) {
             const dim = vectors[0].length;
@@ -734,16 +703,13 @@ class SemanticSearchEngine {
             }
             for (let d = 0; d < dim; d++) centroid[d] /= vectors.length;
             folderVectors.push({ name, vector: centroid, mode: '质心', threshold: CENTROID_ATTRACT_THRESHOLD });
-            console.log(`📊 [FolderAttract] "${name}" → 质心模式 (${vectors.length} 条推文)`);
           }
         } else {
-          // 模式A: 空文件夹，稍后批量生成名称嵌入
           emptyFolderNames.push(name);
           emptyFolderIndices.push(fi);
         }
       }
 
-      // 为空文件夹名生成嵌入
       if (emptyFolderNames.length > 0) {
         const folderEmbResponse = await offscreenManager.sendMessage({
           type: 'OFFSCREEN_EMBED_BATCH',
@@ -757,12 +723,10 @@ class SemanticSearchEngine {
               mode: '名称',
               threshold: NAME_ATTRACT_THRESHOLD
             });
-            console.log(`📝 [FolderAttract] "${emptyFolderNames[j]}" → 名称模式`);
           }
         }
       }
 
-      // 执行吸引匹配
       let attractCount = 0;
       for (let i = validData.length - 1; i >= 0; i--) {
         const item = validData[i];
@@ -773,16 +737,15 @@ class SemanticSearchEngine {
           if (sim > bestSim) { bestSim = sim; bestFolder = fv; }
         }
         if (bestFolder && bestSim >= bestFolder.threshold) {
-          console.log(`🧲 ✅ "${item.text.slice(0, 30)}" → "${bestFolder.name}" (${bestFolder.mode} ${(bestSim * 100).toFixed(1)}%)`);
-          if (!userFolders[bestFolder.name]) userFolders[bestFolder.name] = [];
-          userFolders[bestFolder.name].push(item.bm.id);
-          pinnedIds.add(item.bm.id);
+          const targetName = `🤖 汇入: ${bestFolder.name}`;
+          if (!autoClusters[targetName]) autoClusters[targetName] = [];
+          autoClusters[targetName].push(item.bm);
           validData.splice(i, 1);
           attractCount++;
         }
       }
       console.log(`🧲 [FolderAttract] 本轮共吸引 ${attractCount} 条推文`);
-      await this.saveTwitterFolders(userFolders);
+      // 不再存入 IndexedDB
     }
 
     // 2. Average Linkage Density Clustering
@@ -831,7 +794,6 @@ class SemanticSearchEngine {
     };
 
     // 4. 组装自动聚类结果
-    const autoClusters = {};
     const unclassified = [];
     clusters.sort((a, b) => b.items.length - a.items.length);
 
@@ -1003,41 +965,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 保存用户的推特虚拟文件夹分配
-  if (messageType === 'SAVE_TWITTER_FOLDERS') {
-    searchEngine.saveTwitterFolders(request.folders)
-      .then(() => sendResponse({ success: true }))
-      .catch(error => sendResponse({ success: false, error: error.message }));
-    return true;
-  }
-
-  // 加载用户的推特虚拟文件夹分配
-  if (messageType === 'LOAD_TWITTER_FOLDERS') {
-    searchEngine.loadTwitterFolders()
-      .then(folders => sendResponse({ success: true, folders }))
-      .catch(error => sendResponse({ success: false, error: error.message }));
-    return true;
-  }
-
-  // 移动书签
-  if (messageType === 'MOVE_BOOKMARK') {
-    chrome.bookmarks.move(request.bookmarkId, { parentId: request.parentId }, (res) => {
-      sendResponse({ success: !chrome.runtime.lastError, error: chrome.runtime.lastError?.message });
-    });
-    return true;
-  }
-
-  // 同步Twitter虚拟文件夹到真实Chrome书签
-  if (messageType === 'SYNC_TWITTER_FOLDER_TO_CHROME') {
+  // 批量同步Twitter虚拟草稿文件夹到真实Chrome书签
+  if (messageType === 'SYNC_MULTIPLE_TWITTER_FOLDERS') {
     (async () => {
       try {
-        const { folderName, bookmarkIds } = request;
-        if (!folderName || !bookmarkIds || bookmarkIds.length === 0) {
-          return sendResponse({ success: false, error: '无效的参数' });
-        }
+        const foldersMap = request.folders || {};
+        let totalMoved = 0;
 
-        let folders = await new Promise(resolve => chrome.bookmarks.getTree(resolve));
-        let root = folders[0];
+        let foldersTree = await new Promise(resolve => chrome.bookmarks.getTree(resolve));
+        let root = foldersTree[0];
         let twitterFolder = null;
         const traverseAndFind = (nodes) => {
           for (let node of nodes) {
@@ -1053,26 +989,147 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           throw new Error('未找到主库的 Twitter 根目录，请先随便保存一条推特触发创建。');
         }
 
-        // 查找或创建同名的下级目录
-        let targetFolder = twitterFolder.children ? twitterFolder.children.find(c => c.title === folderName && !c.url) : null;
-        if (!targetFolder) {
-          targetFolder = await new Promise(resolve => chrome.bookmarks.create({
-            parentId: twitterFolder.id,
-            title: folderName
-          }, resolve));
-        }
-
-        // 移动书签
-        let movedCount = 0;
-        for (let id of bookmarkIds) {
-          const bm = await new Promise(resolve => chrome.bookmarks.get(id, (res) => resolve(res ? res[0] : null)));
-          if (bm) {
-            await new Promise(resolve => chrome.bookmarks.move(id, { parentId: targetFolder.id }, resolve));
-            movedCount++;
+        // 处理待同步的文件夹重命名的草稿
+        const renamesMap = request.renames || {};
+        for (const [oldName, newName] of Object.entries(renamesMap)) {
+          let targetFolder = twitterFolder.children ? twitterFolder.children.find(c => c.title === oldName && !c.url) : null;
+          if (targetFolder) {
+            await new Promise(resolve => chrome.bookmarks.update(targetFolder.id, { title: newName }, resolve));
+            targetFolder.title = newName; // 更新内存引用
           }
         }
 
-        sendResponse({ success: true, moved: movedCount });
+        for (const [folderName, bookmarkIds] of Object.entries(foldersMap)) {
+          if (!bookmarkIds || bookmarkIds.length === 0) continue;
+
+          let targetFolder = twitterFolder.children ? twitterFolder.children.find(c => c.title === folderName && !c.url) : null;
+          if (!targetFolder) {
+            targetFolder = await new Promise(resolve => chrome.bookmarks.create({
+              parentId: twitterFolder.id,
+              title: folderName
+            }, resolve));
+            if (!twitterFolder.children) twitterFolder.children = [];
+            twitterFolder.children.push(targetFolder);
+          }
+
+          for (let id of bookmarkIds) {
+            const bm = await new Promise(resolve => chrome.bookmarks.get(id, (res) => resolve(res ? res[0] : null)));
+            if (bm) {
+              await new Promise(resolve => chrome.bookmarks.move(id, { parentId: targetFolder.id }, resolve));
+              totalMoved++;
+            }
+          }
+        }
+        sendResponse({ success: true, moved: totalMoved });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  }
+
+  // 移动书签
+  if (messageType === 'MOVE_BOOKMARK') {
+    chrome.bookmarks.move(request.bookmarkId, { parentId: request.parentId }, (res) => {
+      sendResponse({ success: !chrome.runtime.lastError, error: chrome.runtime.lastError?.message });
+    });
+    return true;
+  }
+
+  // 批量删除书签
+  if (messageType === 'DELETE_MULTIPLE_BOOKMARKS') {
+    (async () => {
+      try {
+        for (let id of request.bookmarkIds) {
+          await new Promise(resolve => chrome.bookmarks.remove(id, resolve));
+        }
+        sendResponse({ success: true });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  }
+
+  // 重命名真实的Twitter本地文件夹
+  if (messageType === 'RENAME_TWITTER_FOLDER') {
+    (async () => {
+      try {
+        const { oldName, newName } = request;
+        let foldersTree = await new Promise(resolve => chrome.bookmarks.getTree(resolve));
+        let root = foldersTree[0];
+        let twitterFolder = null;
+        const traverseAndFind = (nodes) => {
+          for (let node of nodes) {
+            if (node.title === '🐦 Twitter/X 书签' && !node.url && !twitterFolder) {
+              twitterFolder = node;
+            }
+            if (node.children) traverseAndFind(node.children);
+          }
+        };
+        traverseAndFind(root.children);
+
+        if (twitterFolder && twitterFolder.children) {
+          const target = twitterFolder.children.find(c => c.title === oldName && !c.url);
+          if (target) {
+            await new Promise((resolve, reject) => {
+              chrome.bookmarks.update(target.id, { title: newName }, () => {
+                if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+                else resolve();
+              });
+            });
+          } else {
+            throw new Error('未找到原文件夹');
+          }
+        } else {
+          throw new Error('未找到Twitter根目录');
+        }
+        sendResponse({ success: true });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  }
+
+  // 删除书签
+  if (messageType === 'DELETE_BOOKMARK') {
+    chrome.bookmarks.remove(request.bookmarkId, () => {
+      sendResponse({ success: !chrome.runtime.lastError, error: chrome.runtime.lastError?.message });
+    });
+    return true;
+  }
+
+  // 删除真实的Twitter本地文件夹
+  if (messageType === 'DELETE_TWITTER_FOLDER') {
+    (async () => {
+      try {
+        const { folderName } = request;
+        let foldersTree = await new Promise(resolve => chrome.bookmarks.getTree(resolve));
+        let root = foldersTree[0];
+        let twitterFolder = null;
+        const traverseAndFind = (nodes) => {
+          for (let node of nodes) {
+            if (node.title === '🐦 Twitter/X 书签' && !node.url && !twitterFolder) {
+              twitterFolder = node;
+            }
+            if (node.children) traverseAndFind(node.children);
+          }
+        };
+        traverseAndFind(root.children);
+
+        if (twitterFolder && twitterFolder.children) {
+          const target = twitterFolder.children.find(c => c.title === folderName && !c.url);
+          if (target) {
+            await new Promise((resolve, reject) => {
+              chrome.bookmarks.removeTree(target.id, () => {
+                if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+                else resolve();
+              });
+            });
+          }
+        }
+        sendResponse({ success: true });
       } catch (e) {
         sendResponse({ success: false, error: e.message });
       }

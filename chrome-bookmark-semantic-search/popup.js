@@ -63,6 +63,40 @@ class BookmarkSearchUI {
       }
     });
 
+    // 检查当前页面是否为推特/X书签页面
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0] && (tabs[0].url.includes('x.com/i/bookmarks') || tabs[0].url.includes('twitter.com/i/bookmarks'))) {
+        const twActions = document.getElementById('twitterActionsSection');
+        if (twActions) {
+          twActions.style.display = 'block';
+
+          document.getElementById('twBtnCurrent').addEventListener('click', () => {
+            document.getElementById('twBtnCurrent').innerText = '⏳ 提取中...';
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'START_SYNC_CURRENT' }, (res) => {
+              if (res && res.success) {
+                document.getElementById('twBtnCurrent').innerText = `✅ 保存了 ${res.added} 条`;
+              } else {
+                document.getElementById('twBtnCurrent').innerText = '❌ 提取失败';
+              }
+              setTimeout(() => document.getElementById('twBtnCurrent').innerText = '📥 提取当前屏幕', 3000);
+            });
+          });
+
+          document.getElementById('twBtnIncrem').addEventListener('click', () => {
+            document.getElementById('twBtnIncrem').innerText = '⏳ 后台提取中...';
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'START_SYNC_INCREMENTAL' });
+            setTimeout(() => document.getElementById('twBtnIncrem').innerText = '🚀 增量滚屏抓取 (追平即停)', 3000);
+          });
+
+          document.getElementById('twBtnDeep').addEventListener('click', () => {
+            document.getElementById('twBtnDeep').innerText = '⏳ 后台提取中...';
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'START_SYNC_DEEP' });
+            setTimeout(() => document.getElementById('twBtnDeep').innerText = '🌋 深度全量滚屏 (强制到底)', 3000);
+          });
+        }
+      }
+    });
+
     // 使用轮询机制获取进度，不再监听广播消息
   }
 

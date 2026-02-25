@@ -14,7 +14,8 @@
         }
 
         .container {
-            max-width: 1100px;
+            max-width: 1400px;
+            width: 95%;
             margin: 0 auto;
             background: white;
             padding: 30px;
@@ -177,7 +178,7 @@
 
         .btn {
             padding: 8px 16px;
-            background: #667eea;
+            background: #3b82f6;
             color: white;
             border: none;
             border-radius: 6px;
@@ -188,7 +189,7 @@
         }
 
         .btn:hover {
-            background: #5a67d8;
+            background: #2563eb;
         }
 
         .btn-secondary {
@@ -200,67 +201,39 @@
             background: #1a8cd8;
         }
 
-        .x-card {
-            background: white;
-            border: 1px solid #e2e8f0;
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 15px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
-            border-left: 4px solid #1d9bf0;
-        }
-
-        .x-card .x-author {
-            font-weight: bold;
-            color: #1d9bf0;
-            margin-bottom: 6px;
-            font-size: 15px;
-        }
-
-        .x-card .x-text {
-            color: #334155;
-            font-size: 14px;
-            line-height: 1.5;
-            margin-bottom: 8px;
-        }
-
-        .x-card .x-link {
-            font-size: 12px;
-            color: #94a3b8;
-        }
-
-        /* 暗色表格样式 (模仿高级仪表盘) */
+        /* 亮色表格样式 */
         .dt-wrapper {
-            background: #0f0f0f;
+            background: #ffffff;
             border-radius: 8px;
             overflow: hidden;
-            border: 1px solid #222;
+            border: 1px solid #e2e8f0;
         }
 
         .dt-table {
             width: 100%;
             border-collapse: collapse;
-            color: #e2e8f0;
+            color: #334155;
             font-size: 13px;
             text-align: left;
         }
 
         .dt-table th {
             padding: 12px;
-            color: #888;
-            font-weight: normal;
-            border-bottom: 1px solid #222;
+            color: #64748b;
+            font-weight: 600;
+            background: #f8fafc;
+            border-bottom: 2px solid #e2e8f0;
             white-space: nowrap;
         }
 
         .dt-table td {
             padding: 15px 12px;
-            border-bottom: 1px solid #1a1a1a;
+            border-bottom: 1px solid #f1f5f9;
             vertical-align: top;
         }
 
         .dt-table tr:hover {
-            background: #181818;
+            background: #f8fafc;
         }
 
         .dt-author {
@@ -274,8 +247,14 @@
             width: 36px;
             height: 36px;
             border-radius: 50%;
-            background: #333;
+            background: #cbd5e1;
             object-fit: cover;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            flex-shrink: 0;
         }
 
         .dt-author-info {
@@ -286,37 +265,39 @@
 
         .dt-name {
             font-weight: 600;
-            color: #fff;
+            color: #0f172a;
             font-size: 14px;
         }
 
         .dt-handle {
-            color: #71767b;
+            color: #64748b;
             font-size: 12px;
         }
 
         .dt-text {
-            color: #d1d5db;
+            color: #475569;
             line-height: 1.5;
-            max-width: 350px;
+            max-width: 450px;
+            word-break: break-word;
         }
 
         .dt-stats {
-            color: #e2e8f0;
+            color: #64748b;
             font-weight: 500;
         }
 
         .dt-media-box {
             width: 48px;
             height: 48px;
-            background: #222;
+            background: #f1f5f9;
             border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #555;
+            color: #94a3b8;
             font-size: 20px;
-            border: 1px solid #333;
+            border: 1px solid #e2e8f0;
+            flex-shrink: 0;
         }
     </style>
 </head>
@@ -352,9 +333,15 @@
             </div>
         </div>
 
+        <div class="search-box" style="margin-bottom: 20px; display: flex; gap: 10px; align-items: center;">
+            <input type="text" id="dashSearchInput" placeholder="🤖 试试用自然语言描述你想找的书签内容..." style="flex: 1; padding: 14px 20px; font-size: 16px; border: 2px solid #e2e8f0; border-radius: 8px; outline: none; transition: 0.2s;" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'">
+            <button class="btn" id="dashSearchBtn" style="padding: 14px 30px; font-size: 16px; display: flex; align-items: center; gap: 8px;">🔍 语义搜索</button>
+        </div>
+
         <div class="tabs">
             <button class="tab-btn active" data-target="tab-folders">📁 语义折叠树</button>
             <button class="tab-btn" data-target="tab-twitter">🐦 推特/X 知识库</button>
+            <button class="tab-btn" data-target="tab-search" id="tabSearchBtn" style="display: none;">🔍 搜索结果</button>
         </div>
 
         <div id="tab-folders" class="view-section active">
@@ -375,24 +362,32 @@
             </div>
 
             <div class="index-view" id="xView" style="background: #f8fafc; padding: 20px;"></div>
-            <div id="cDialogOverlay"
-                style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(2px);">
-                <div
-                    style="background:white; padding: 25px; border-radius: 12px; width: 420px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
-                    <h3 id="cDialogTitle"
-                        style="margin-top:0; color:#333; display: flex; align-items: center; gap: 8px;">提示</h3>
-                    <div id="cDialogMessage"
-                        style="color:#475569; font-size:15px; line-height:1.6; margin-bottom:20px; white-space: pre-wrap;">
-                    </div>
-                    <input type="text" id="cDialogInput"
-                        style="display:none; width:100%; box-sizing:border-box; padding:10px; border:1px solid #cbd5e1; border-radius:6px; margin-bottom:20px; font-size:14px; outline:none;">
-                    <div style="display:flex; justify-content:flex-end; gap:10px;">
-                        <button id="cDialogCancel" class="btn" style="background:#f1f5f9; color:#475569;">取消</button>
-                        <button id="cDialogConfirm" class="btn" style="background:#3b82f6;">确定</button>
-                    </div>
+        </div>
+
+        <div id="tab-search" class="view-section">
+            <div id="searchStatus" style="padding: 15px; margin-bottom: 15px; background: #eff6ff; color: #1e3a8a; border-radius: 8px; display: none;"></div>
+            <div class="index-view" id="searchView" style="padding: 20px; background: #f8fafc; display: flex; flex-direction: column; gap: 10px;"></div>
+        </div>
+
+        <div id="cDialogOverlay"
+            style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(2px);">
+            <div
+                style="background:white; padding: 25px; border-radius: 12px; width: 420px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+                <h3 id="cDialogTitle"
+                    style="margin-top:0; color:#333; display: flex; align-items: center; gap: 8px;">提示</h3>
+                <div id="cDialogMessage"
+                    style="color:#475569; font-size:15px; line-height:1.6; margin-bottom:20px; white-space: pre-wrap;">
+                </div>
+                <input type="text" id="cDialogInput"
+                    style="display:none; width:100%; box-sizing:border-box; padding:10px; border:1px solid #cbd5e1; border-radius:6px; margin-bottom:20px; font-size:14px; outline:none;">
+                <div style="display:flex; justify-content:flex-end; gap:10px;">
+                    <button id="cDialogCancel" class="btn" style="background:#f1f5f9; color:#475569;">取消</button>
+                    <button id="cDialogConfirm" class="btn" style="background:#3b82f6;">确定</button>
                 </div>
             </div>
-            <script src="dashboard.js"></script>
+        </div>
+    </div>
+    <script src="dashboard.js"></script>
 </body>
 
 </html>

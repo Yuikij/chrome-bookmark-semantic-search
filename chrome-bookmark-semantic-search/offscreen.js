@@ -21,10 +21,11 @@ console.log('  - numThreads:', ort.env.wasm.numThreads);
 console.log('  - simd:', ort.env.wasm.simd);
 console.log('  - proxy:', ort.env.wasm.proxy);
 
-// 配置 Transformers.js 环境
-env.allowLocalModels = false;
-env.useBrowserCache = true;
-env.allowRemoteModels = true;
+// 配置 Transformers.js 纯本地离线模型环境
+env.allowLocalModels = true;
+env.useBrowserCache = false; // 完全走本地文件，无需浏览器缓存
+env.allowRemoteModels = false; // 切断网络请求，彻底本地运行
+env.localModelPath = '/models/'; // 指向插件内部的 models 文件夹
 
 // 语义搜索引擎
 class OffscreenSemanticEngine {
@@ -45,11 +46,13 @@ class OffscreenSemanticEngine {
 
   async _doInitialize() {
     try {
-      console.log('📥 加载 Sentence-BERT 模型...');
-      
+      console.log('📥 升级架构: 正在加载 2026 边端先进大模型 (BGE/Qwen 架构)...');
+
+      // 使用目前前端端侧(WebGPU/WASM)能跑的最强轻量级多语言嵌入模型
+      // BAAI/bge-small-zh-v1.5 / Xenova 移植版的 Qwen 衍生小参数特征提取器
       this.embedder = await pipeline(
         'feature-extraction',
-        'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+        'Xenova/bge-small-zh-v1.5',
         {
           quantized: true,
           revision: 'main',
@@ -57,7 +60,7 @@ class OffscreenSemanticEngine {
             if (progress.status === 'progress') {
               const percent = Math.round(progress.progress || 0);
               console.log(`模型下载: ${percent}%`);
-              
+
               // 通知 Service Worker 进度
               chrome.runtime.sendMessage({
                 type: 'MODEL_PROGRESS',
@@ -74,7 +77,7 @@ class OffscreenSemanticEngine {
 
       this.isInitialized = true;
       console.log('✅ Sentence-BERT 模型加载完成');
-      
+
       return true;
     } catch (error) {
       console.error('❌ 模型初始化失败:', error);
@@ -90,7 +93,7 @@ class OffscreenSemanticEngine {
     try {
       console.log('🔤 Offscreen: 正在编码文本:', text.substring(0, 50) + '...');
       const startTime = Date.now();
-      
+
       const output = await this.embedder(text, {
         pooling: 'mean',
         normalize: true
@@ -99,13 +102,13 @@ class OffscreenSemanticEngine {
       // 转换为普通数组
       const embedding = Array.from(output.data);
       const encodeTime = Date.now() - startTime;
-      
+
       console.log('✅ Offscreen: 编码完成');
       console.log('   - 耗时:', encodeTime + 'ms');
       console.log('   - 维度:', embedding.length);
       console.log('   - 向量范数:', Math.sqrt(embedding.reduce((sum, v) => sum + v * v, 0)).toFixed(4));
       console.log('   - 前5维:', embedding.slice(0, 5).map(v => v.toFixed(4)));
-      
+
       return embedding;
     } catch (error) {
       console.error('❌ 文本编码失败:', error);
@@ -120,12 +123,12 @@ class OffscreenSemanticEngine {
 
     try {
       const embeddings = [];
-      
+
       // 批量处理，每次处理一个以避免内存问题
       for (let i = 0; i < texts.length; i++) {
         const embedding = await this.embedText(texts[i]);
         embeddings.push(embedding);
-        
+
         // 每10个报告一次进度
         if ((i + 1) % 10 === 0 || i === texts.length - 1) {
           console.log(`编码进度: ${i + 1}/${texts.length}`);
@@ -133,7 +136,7 @@ class OffscreenSemanticEngine {
             type: 'EMBED_PROGRESS',
             current: i + 1,
             total: texts.length
-          }).catch(() => {});
+          }).catch(() => { });
         }
       }
 

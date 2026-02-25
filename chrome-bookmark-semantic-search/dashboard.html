@@ -228,6 +228,96 @@
             font-size: 12px;
             color: #94a3b8;
         }
+
+        /* 暗色表格样式 (模仿高级仪表盘) */
+        .dt-wrapper {
+            background: #0f0f0f;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #222;
+        }
+
+        .dt-table {
+            width: 100%;
+            border-collapse: collapse;
+            color: #e2e8f0;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        .dt-table th {
+            padding: 12px;
+            color: #888;
+            font-weight: normal;
+            border-bottom: 1px solid #222;
+            white-space: nowrap;
+        }
+
+        .dt-table td {
+            padding: 15px 12px;
+            border-bottom: 1px solid #1a1a1a;
+            vertical-align: top;
+        }
+
+        .dt-table tr:hover {
+            background: #181818;
+        }
+
+        .dt-author {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 150px;
+        }
+
+        .dt-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #333;
+            object-fit: cover;
+        }
+
+        .dt-author-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .dt-name {
+            font-weight: 600;
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .dt-handle {
+            color: #71767b;
+            font-size: 12px;
+        }
+
+        .dt-text {
+            color: #d1d5db;
+            line-height: 1.5;
+            max-width: 350px;
+        }
+
+        .dt-stats {
+            color: #e2e8f0;
+            font-weight: 500;
+        }
+
+        .dt-media-box {
+            width: 48px;
+            height: 48px;
+            background: #222;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #555;
+            font-size: 20px;
+            border: 1px solid #333;
+        }
     </style>
 </head>
 
@@ -238,6 +328,8 @@
             <div style="display: flex; gap: 10px;">
                 <button class="btn" id="refreshBtn">🔄 刷新数据</button>
                 <button class="btn btn-secondary" id="openTwitterBtn">🐦 同步新的推特书签</button>
+                <button class="btn" id="forceReinitBtn" style="background: #ef4444;" title="清除模型缓存并重新下载配置新的特征提取模型">⚠️
+                    强制重置端侧模型</button>
             </div>
         </h1>
 
@@ -271,20 +363,36 @@
 
         <div id="tab-twitter" class="view-section">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <p style="color: #64748b; margin: 0; font-size: 14px;">专属推特 / X 聚合池，它们可以独立沉淀，也可以随时打散汇入你的本地知识库中。</p>
+                <p style="color: #64748b; margin: 0; font-size: 14px;">专属推特/X 知识库。数据仅保存在仪表盘内，完全隔离不会修改您的 Chrome 书签结构。</p>
                 <button class="btn" id="categorizeTwitterBtn"
-                    style="background: #8b5cf6; box-shadow: 0 4px 14px rgba(139, 92, 246, 0.4);">✨ 智能分发推特书签</button>
+                    style="background: #10b981; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">🔮
+                    基于大模型生成虚拟分类树</button>
             </div>
 
             <div id="twitterCategorizeStatus"
-                style="display: none; background: #fdf2f8; border: 1px solid #fbcfe8; color: #db2777; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                style="display: none; background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
                 <!-- Status innerHTML goes here -->
             </div>
 
             <div class="index-view" id="xView" style="background: #f8fafc; padding: 20px;"></div>
-        </div>
-    </div>
-    <script src="dashboard.js"></script>
+            <div id="cDialogOverlay"
+                style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(2px);">
+                <div
+                    style="background:white; padding: 25px; border-radius: 12px; width: 420px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+                    <h3 id="cDialogTitle"
+                        style="margin-top:0; color:#333; display: flex; align-items: center; gap: 8px;">提示</h3>
+                    <div id="cDialogMessage"
+                        style="color:#475569; font-size:15px; line-height:1.6; margin-bottom:20px; white-space: pre-wrap;">
+                    </div>
+                    <input type="text" id="cDialogInput"
+                        style="display:none; width:100%; box-sizing:border-box; padding:10px; border:1px solid #cbd5e1; border-radius:6px; margin-bottom:20px; font-size:14px; outline:none;">
+                    <div style="display:flex; justify-content:flex-end; gap:10px;">
+                        <button id="cDialogCancel" class="btn" style="background:#f1f5f9; color:#475569;">取消</button>
+                        <button id="cDialogConfirm" class="btn" style="background:#3b82f6;">确定</button>
+                    </div>
+                </div>
+            </div>
+            <script src="dashboard.js"></script>
 </body>
 
 </html>

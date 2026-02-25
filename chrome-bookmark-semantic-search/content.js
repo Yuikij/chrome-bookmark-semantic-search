@@ -20,10 +20,14 @@ if (window.location.hostname.includes('x.com') || window.location.hostname.inclu
     btnCurrent.style = btnStyle;
 
     const btnAll = document.createElement('button');
-    btnAll.innerHTML = '🚀 自动滚屏抓取全部';
+    btnAll.innerHTML = '🚀 增量滚屏抓取 (追平即停)';
     btnAll.style = btnStyle + 'background: #10b981; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);';
 
-    [btnCurrent, btnAll].forEach(btn => {
+    const btnDeepAll = document.createElement('button');
+    btnDeepAll.innerHTML = '🌋 深度全量滚屏 (强制扫到底)';
+    btnDeepAll.style = btnStyle + 'background: #8b5cf6; box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4);';
+
+    [btnCurrent, btnAll, btnDeepAll].forEach(btn => {
       btn.onmouseover = () => btn.style.transform = 'scale(1.05)';
       btn.onmouseout = () => btn.style.transform = 'scale(1)';
     });
@@ -45,8 +49,48 @@ if (window.location.hostname.includes('x.com') || window.location.hostname.inclu
           if (timeEl && timeEl.parentElement && timeEl.parentElement.tagName === 'A') {
             tweetUrl = timeEl.parentElement.href;
           }
+
+          // --- 新增：提取媒体和数据指标 ---
+          // 提取图片或视频封面
+          let mediaUrl = '';
+          const imgEl = article.querySelector('[data-testid="tweetPhoto"] img, [data-testid="videoComponent"] video');
+          if (imgEl) {
+            mediaUrl = imgEl.tagName === 'IMG' ? imgEl.src : (imgEl.poster || '');
+          }
+
+          // 提取转推、点赞、浏览量
+          let retweets = '-', likes = '-', views = '-';
+
+          const getStatByLabel = (keyword) => {
+            const btn = article.querySelector(`[aria-label*="${keyword}"]`);
+            if (btn) {
+              const match = btn.getAttribute('aria-label').match(/^[^\d]*([\d,]+)/);
+              if (match) {
+                let num = parseInt(match[1].replace(/,/g, ''), 10);
+                if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+                if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+                return num.toString();
+              }
+            }
+            return '-';
+          };
+
+          // 适配不同语言的 aria-label
+          retweets = getStatByLabel('Repost') || getStatByLabel('转推') || '-';
+          likes = getStatByLabel('Like') || getStatByLabel('喜欢') || getStatByLabel('赞') || '-';
+          views = getStatByLabel('View') || getStatByLabel('查看') || getStatByLabel('浏览量') || '-';
+
+          const metadataObj = { mediaUrl, retweets, likes, views };
+          // -----------------------------
+
           const title = `[X推文] ${authorInfo}: ${text.substring(0, 60)}${text.length > 60 ? '...' : ''}`;
-          bookmarks.push({ title, url: tweetUrl });
+          // 我们将 metadata 作为一个特殊字段传回，虽然 Chrome 原生 bookmark 只存 title/url，
+          // 但我们在这边通过一个巧妙的方式暂存：我们可以在 title 里偷偷带上一段不可见的 JSON 字符串，
+          // 因为原版 Chrome Bookmarks 并不支持自定义字段。
+          // 这里使用隐藏的尾部标记，之后在面板解析出来。
+          const hiddenData = ' \u200B' + JSON.stringify(metadataObj) + '\u200B';
+
+          bookmarks.push({ title: title + hiddenData, url: tweetUrl });
         } catch (e) {
           console.error('提取失败', e);
         }
@@ -64,30 +108,34 @@ if (window.location.hostname.includes('x.com') || window.location.hostname.inclu
       saveBookmarks(bms, btnCurrent, '📥 提取当前屏幕');
     };
 
-    // 全自动滚屏提取事件（增量 + 仿生学防封）
-    btnAll.onclick = async () => {
+    // 通用的全自动滚屏提取逻辑
+    const autoScrollAndExtract = async (btnElement, isDeepMode) => {
       if (isAutoScrolling) {
         isAutoScrolling = false; // 中断标志
-        btnAll.innerText = '🛑 正在停止...';
+        btnElement.innerText = '🛑 正在停止...';
         return;
       }
       isAutoScrolling = true;
-      btnAll.innerHTML = '🛑 停止抓取并打包 (已抓 0)';
+      btnElement.innerHTML = '🛑 停止抓取并打包 (已抓 0)';
+
+      // 禁用另一个按钮
+      const otherBtn = isDeepMode ? btnAll : btnDeepAll;
+      const originalOtherText = otherBtn.innerText;
+      otherBtn.disabled = true;
+      otherBtn.style.opacity = '0.5';
 
       const allBookmarksMap = new Map();
       let lastSize = 0;
       let noGrowthCount = 0;
       let zeroNovelCount = 0;
 
-      // 仿人类平滑随机滚动
       const scrollAndWait = () => new Promise(resolve => {
-        const scrollDelta = window.innerHeight * (0.6 + Math.random() * 0.6); // 每次拉动屏幕 60%~120%
+        const scrollDelta = window.innerHeight * (0.6 + Math.random() * 0.6);
         window.scrollBy({ top: scrollDelta, behavior: 'smooth' });
-        const waitTime = 1200 + Math.random() * 1500; // 随机停顿 1.2秒 到 2.7秒
+        const waitTime = 1200 + Math.random() * 1500;
         setTimeout(resolve, waitTime);
       });
 
-      // 借由后台接口核对当前屏幕的数据有几条是"全新"的
       const checkNovel = (bms) => new Promise(resolve => {
         chrome.runtime.sendMessage({ type: 'CHECK_NEW_BOOKMARKS', bookmarks: bms }, (res) => {
           resolve(res?.newCount || 0);
@@ -95,30 +143,29 @@ if (window.location.hostname.includes('x.com') || window.location.hostname.inclu
       });
 
       while (isAutoScrolling) {
-        // 1. 提取当前屏
         const currentBms = extractScreen();
         currentBms.forEach(bm => allBookmarksMap.set(bm.url, bm));
-        btnAll.innerHTML = `🛑 停止抓取并打包 (准备保存 ${allBookmarksMap.size})`;
+        btnElement.innerHTML = `🛑 停止抓取并打包 (准备保存 ${allBookmarksMap.size})`;
 
-        // 2. 检测增量：判断是否遇到了之前已经保存过的大批旧收藏
-        if (currentBms.length > 0) {
+        // 如果不是深度模式，才执行增量中断逻辑
+        if (!isDeepMode && currentBms.length > 0) {
           const novelCount = await checkNovel(currentBms);
           if (novelCount === 0) {
             zeroNovelCount++;
             if (zeroNovelCount >= 3) {
-              console.log('增量同步触发：当前屏幕往下连续3页都已经是本地拥有的旧收藏，停止自动爬取。');
-              break; // 断开，实现增量抓取极限性能
+              console.log('增量同步触发：连续3页都是旧收藏，停止自动爬取。');
+              break;
             }
           } else {
             zeroNovelCount = 0;
           }
         }
 
-        // 3. 检测是否到底部或没有新内容
+        // 检测由于推特限制懒加载卡住的情况或者真到底部了 (深度爬取主要靠这个停止)
         if (allBookmarksMap.size === lastSize) {
           noGrowthCount++;
-          if (noGrowthCount >= 4) { // 连续4次滚动总数没涨认为见底
-            console.log('增量同步触发：推特书签已全部加到底部。');
+          if (noGrowthCount >= (isDeepMode ? 5 : 4)) {
+            console.log('触发停止条件：页面已无新内容或已到底部。');
             break;
           }
         } else {
@@ -126,16 +173,21 @@ if (window.location.hostname.includes('x.com') || window.location.hostname.inclu
         }
         lastSize = allBookmarksMap.size;
 
-        // 4. 继续滚页面
         await scrollAndWait();
       }
 
-      // 结束循环，提交数据
       isAutoScrolling = false;
+      otherBtn.disabled = false;
+      otherBtn.style.opacity = '1';
+      otherBtn.innerText = originalOtherText;
+
       const finalBookmarks = Array.from(allBookmarksMap.values());
-      btnAll.innerText = `⏳ 正在打包 ${finalBookmarks.length} 条...`;
-      saveBookmarks(finalBookmarks, btnAll, '🚀 自动滚屏抓取全部');
+      btnElement.innerText = `⏳ 正在打包 ${finalBookmarks.length} 条...`;
+      saveBookmarks(finalBookmarks, btnElement, isDeepMode ? '🌋 深度全量滚屏 (强制扫到底)' : '🚀 增量滚屏抓取 (追平即停)');
     };
+
+    btnAll.onclick = () => autoScrollAndExtract(btnAll, false);
+    btnDeepAll.onclick = () => autoScrollAndExtract(btnDeepAll, true);
 
     function saveBookmarks(bookmarks, btnElement, originalText) {
       if (bookmarks.length === 0) {
@@ -163,6 +215,7 @@ if (window.location.hostname.includes('x.com') || window.location.hostname.inclu
 
     container.appendChild(btnCurrent);
     container.appendChild(btnAll);
+    container.appendChild(btnDeepAll);
     document.body.appendChild(container);
   }
 

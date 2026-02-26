@@ -1,4 +1,47 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // --- 图片预览弹窗逻辑 (CSP 兼容：不使用 inline handler) ---
+    const imageOverlay = document.getElementById('imagePreviewOverlay');
+    const imagePreviewImg = document.getElementById('imagePreviewImg');
+    const imagePreviewLink = document.getElementById('imagePreviewLink');
+    const imagePreviewClose = document.getElementById('imagePreviewClose');
+
+    window.showImagePreview = function (url) {
+        imagePreviewImg.src = url;
+        imagePreviewLink.href = url;
+        imageOverlay.style.display = 'flex';
+    };
+
+    // 关闭按钮
+    imagePreviewClose.addEventListener('click', () => { imageOverlay.style.display = 'none'; });
+    // 点击背景关闭
+    imageOverlay.addEventListener('click', (e) => { if (e.target === imageOverlay) imageOverlay.style.display = 'none'; });
+    // 悬浮效果
+    imagePreviewLink.addEventListener('mouseover', () => { imagePreviewLink.style.background = 'rgba(255,255,255,0.2)'; });
+    imagePreviewLink.addEventListener('mouseout', () => { imagePreviewLink.style.background = 'rgba(255,255,255,0.1)'; });
+
+    // 事件委托：捕获所有动态生成的缩略图点击
+    document.addEventListener('click', (e) => {
+        const thumb = e.target.closest('.media-thumb');
+        if (thumb) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.showImagePreview(thumb.src);
+        }
+    });
+
+    // 头像加载失败回退 (CSP 不允许 inline onerror)
+    document.addEventListener('error', (e) => {
+        if (e.target.classList && e.target.classList.contains('avatar-img')) {
+            e.target.style.display = 'none';
+            if (e.target.nextElementSibling) e.target.nextElementSibling.style.display = 'flex';
+        }
+    }, true); // 必须用捕获阶段，error 事件不冒泡
+
+    // 注入 hover 效果样式（避免 inline onmouseover）
+    const hoverStyle = document.createElement('style');
+    hoverStyle.textContent = '.media-thumb:hover { transform: scale(1.08) !important; }';
+    document.head.appendChild(hoverStyle);
+
     // --- 自定义弹窗逻辑 ---
     const cOverlay = document.getElementById('cDialogOverlay');
     function closeDialog() {
@@ -242,7 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td style="color:#555; text-align:center; font-family:monospace;">${i + 1}</td>
                     <td>
                         <div class="dt-author">
-                            ${avatarUrl ? `<img src="${avatarUrl}" class="dt-avatar" onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='flex';" />` : ''}
+                            ${avatarUrl ? `<img src="${avatarUrl}" class="dt-avatar avatar-img" />` : ''}
                             <div class="dt-avatar" style="${avatarUrl ? 'display:none;' : ''}">${author.charAt(0).toUpperCase()}</div>
                             <div class="dt-author-info">
                                 <span class="dt-name">${escapeHtml(author)}</span>
@@ -255,7 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <a href="${escapeHtml(b.url)}" target="_blank" style="color:#3b82f6; font-size:12px; margin-top:8px; display:inline-block; text-decoration:none;">查看原推 ↗</a>
                     </td>
                     <td style="text-align:center;">
-                        ${meta.mediaUrl ? `<img src="${meta.mediaUrl}" style="height:48px; border-radius:4px; object-fit:cover; border:1px solid #e2e8f0;" />` : (isMedia ? `<div class="dt-media-box" style="margin:0 auto;">🖼️</div>` : `<span style="color:#94a3b8;">-</span>`)}
+                        ${meta.mediaUrl ? `<img src="${meta.mediaUrl}" class="media-thumb" title="点击查看大图" style="height:48px; border-radius:4px; object-fit:cover; border:1px solid #e2e8f0; cursor:pointer; transition:transform 0.2s;" />` : (isMedia ? `<div class="dt-media-box" style="margin:0 auto;">🖼️</div>` : `<span style="color:#94a3b8;">-</span>`)}
                     </td>
                     <td class="dt-stats" style="text-align:center; color:#94a3b8;">${meta.views}</td>
                     <td class="dt-stats" style="text-align:center; color:#94a3b8;">${meta.retweets}</td>

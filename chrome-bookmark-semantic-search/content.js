@@ -56,7 +56,7 @@ if (window.location.hostname.includes('x.com') || window.location.hostname.inclu
         }
 
         const metadataObj = { mediaUrl, retweets, likes, views };
-        const title = `[X推文] ${authorInfo}: ${text.substring(0, 60)}${text.length > 60 ? '...' : ''}`;
+        const title = `[X推文] ${authorInfo}: ${text.substring(0, 120)}${text.length > 120 ? '...' : ''}`;
         const hiddenData = ' \u200B' + JSON.stringify(metadataObj) + '\u200B';
 
         bookmarks.push({ title: title + hiddenData, url: tweetUrl });

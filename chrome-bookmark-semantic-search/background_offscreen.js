@@ -173,10 +173,18 @@ class SemanticSearchEngine {
   }
 
   buildSemanticText(bm) {
-    const title = bm.title || '';
-    const cleanUrl = this.cleanUrlForSemantic(bm.url);
+    let title = bm.title || '';
+    // 去除书签标题中隐藏的 JSON 元数据（以零宽字符 \u200B 包裹的部分），防污染向量
+    title = title.replace(/\u200B.*?\u200B/g, '').trim();
+
+    let cleanUrl = this.cleanUrlForSemantic(bm.url);
+    // 对于 Twitter 短信内容，URL 中的大量数字 ID 和用户名实际上对语义干扰很大，尽量弱化或不放进去
+    if (bm.url && (bm.url.includes('x.com/') || bm.url.includes('twitter.com/'))) {
+      cleanUrl = ''; // 不使用 Twitter URL 参与语义编码
+    }
+
     // 为后期的"自动分类"打下基础：利用当前的文件夹路径作为强语义特征
-    const folder = bm.folderPath ? `[📁 ${bm.folderPath}]` : '';
+    const folder = bm.folderPath && !bm.folderPath.includes('Twitter/X 书签') ? `[📁 ${bm.folderPath}]` : '';
     // 将来如果有网页正文抓取功能，可追加到此处
     return `${title} ${cleanUrl} ${folder}`.trim();
   }
@@ -660,8 +668,8 @@ class SemanticSearchEngine {
     for (const bm of xBookmarks) {
       if (pinnedIds.has(bm.id)) continue;
 
-      const match = bm.title.match(/\[X推文\]\s*(.*?):\s*(.*)/);
-      let text = bm.title;
+      let text = bm.title.replace(/\u200B.*?\u200B/g, '').trim(); // 去除元数据
+      const match = text.match(/\[X推文\]\s*(.*?):\s*(.*)/);
       if (match) text = match[2].trim();
 
       if (text === '图片/视频推文' || text === '图片/视频推文...' || text === '图片/视频推文 ...' || text.length < 5) {
@@ -749,7 +757,7 @@ class SemanticSearchEngine {
     }
 
     // 2. Average Linkage Density Clustering
-    const SIMILARITY_THRESHOLD = 0.80;
+    const SIMILARITY_THRESHOLD = 0.65; // 降低阈值，0.80会导致大量短文本因缺乏共同词汇而无法聚类，从而进入未归类
     const clusters = [];
 
     for (let item of validData) {
@@ -776,21 +784,58 @@ class SemanticSearchEngine {
     }
 
     // 3. 提取关键词命名
-    const stopWords = new Set(['推文', 'x推文', '的', '了', '和', '是', '在', '我', '有', '就', '也', '都', '不', '被', '与', '为', '要', '这', 'https', 'com', 'twitter', 'status', 'photo', 'video', '分享', '可以', '这个', '我们', '一个', '没有', '什么', '对于', '如果', '或者', '一下', '非常', '很多', '就是', '大家', '已经', '知道', '自己', '觉得', '因为', '然后', '但是', '还是', '怎么', '那么', '这种', '比较', '而且', '其实', '只有', '不过', '所以', '可能', '现在', '那些', '有些', '看到', '时候', '只是', '一样', '出来', '开始', '认为', '我的', '你的', '他的', '他们', '那个', '这些', '那些', '特别', '并且', '甚至', '如何', '真的', '不会']);
+    const stopWords = new Set(['的', '了', '和', '是', '在', '我', '有', '就', '也', '都', '不', '被', '与', '为', '要', '这', 'https', 'com', 'twitter', 'status', 'photo', 'video', '分享', '可以', '这个', '我们', '一个', '没有', '什么', '对于', '如果', '或者', '一下', '非常', '很多', '就是', '大家', '已经', '知道', '自己', '觉得', '因为', '然后', '但是', '还是', '怎么', '那么', '这种', '比较', '而且', '其实', '只有', '不过', '所以', '可能', '现在', '那些', '有些', '看到', '时候', '只是', '一样', '出来', '开始', '认为', '我的', '你的', '他的', '他们', '那个', '这些', '那些', '特别', '并且', '甚至', '如何', '真的', '不会', '可以', '需要', '问题', '推文', 'x推文', '不知不觉中', '这篇已经将近', '建议务必收藏和阅读']);
 
     const extractName = (items) => {
+      // 如果仅有一个项目，不该走到这里，但为了稳妥起见
+      if (items.length === 1) return '🔸 议题：' + items[0].text.substring(0, 10) + '...';
+
+      // 1. 计算该聚类的中心点 (Centroid)
+      const dim = items[0].vector.length;
+      let centroid = new Array(dim).fill(0);
+      for (const item of items) {
+        for (let j = 0; j < dim; j++) {
+          centroid[j] += item.vector[j];
+        }
+      }
+      for (let j = 0; j < dim; j++) {
+        centroid[j] /= items.length;
+      }
+
+      // 2. 找到最接近中心点的那条推文 (Medoid / 代表性推文)
+      let bestItem = null;
+      let maxSim = -Infinity;
+      for (const item of items) {
+        const sim = this.cosineSimilarity(item.vector, centroid);
+        if (sim > maxSim) {
+          maxSim = sim;
+          bestItem = item;
+        }
+      }
+
+      // 3. 提取提取式摘要（代表性句子的核心成分）作为标题
+      const bestText = bestItem ? bestItem.text : items[0].text;
+
+      // 使用词频统计来辅助从最强的那条推文里掏词
       let wordFreq = {};
       items.forEach(item => {
-        let text = item.text;
-        const tokens = text.match(/[\u4e00-\u9fa5]{2,}|[a-zA-Z]{3,}/g) || [];
+        const tokens = item.text.match(/[\u4e00-\u9fa5]{2,}|[a-zA-Z0-9_\-]{4,}/g) || [];
         tokens.forEach(t => {
           t = t.toLowerCase();
           if (!stopWords.has(t)) { wordFreq[t] = (wordFreq[t] || 0) + 1; }
         });
       });
-      let sorted = Object.entries(wordFreq).sort((a, b) => b[1] - a[1]);
-      let topWords = sorted.slice(0, 3).map(x => x[0]);
-      return topWords.length > 0 ? '🔸 议题：' + topWords.join(' · ') : '🔸 杂集';
+
+      const bestTokens = bestText.match(/[\u4e00-\u9fa5]{2,}|[a-zA-Z0-9_\-]{4,}/g) || [];
+      const validTokens = bestTokens.filter(t => !stopWords.has(t.toLowerCase()));
+
+      // 按照全局词频对代表性推文中的词语进行排序
+      validTokens.sort((a, b) => (wordFreq[b.toLowerCase()] || 0) - (wordFreq[a.toLowerCase()] || 0));
+
+      // 取前两个最核心且在这条最具代表性推文中存在的词语拼接
+      let topWords = [...new Set(validTokens)].slice(0, 2);
+
+      return topWords.length > 0 ? '🔸 议题：' + topWords.join(' · ') : '🔸 深度讨论集 (杂项)';
     };
 
     // 4. 组装自动聚类结果
@@ -808,7 +853,7 @@ class SemanticSearchEngine {
       }
     }
     if (unclassified.length > 0) {
-      autoClusters['📌 未归类推文'] = unclassified;
+      autoClusters['📌 零星议题 / 杂谈'] = unclassified;
     }
     if (mediaBookmarks.length > 0) {
       autoClusters['🖼️ 影像 / 链接转发集'] = mediaBookmarks;

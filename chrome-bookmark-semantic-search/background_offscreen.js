@@ -757,7 +757,7 @@ class SemanticSearchEngine {
     }
 
     // 2. Average Linkage Density Clustering
-    const SIMILARITY_THRESHOLD = 0.65; // 降低阈值，0.80会导致大量短文本因缺乏共同词汇而无法聚类，从而进入未归类
+    const SIMILARITY_THRESHOLD = 0.78; // 提高阈值，之前 0.65 太低导致几乎所有推文被聚类成一个大文件夹
     const clusters = [];
 
     for (let item of validData) {

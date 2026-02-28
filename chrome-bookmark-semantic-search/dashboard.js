@@ -71,6 +71,120 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // --- 轻量悬浮气泡确认框逻辑 (Bubble Confirm Tooltip) ---
+    // 为了不打断用户操作的上下文体验而设计的最轻量弹层，带指示箭头
+    let activeBubble = null;
+    function cBubbleConfirm(targetEl, htmlMsg, width = 240) {
+        return new Promise(resolve => {
+            if (activeBubble) {
+                document.body.removeChild(activeBubble);
+                activeBubble = null;
+            }
+
+            const rect = targetEl.getBoundingClientRect();
+            const bubble = document.createElement('div');
+            // Outer container positioning
+            bubble.style.cssText = `
+                position: fixed;
+                z-index: 10000;
+                pointer-events: auto;
+                left: ${rect.right - width + 10}px;
+                top: ${rect.bottom + 10}px;
+                opacity: 0;
+                transform: translateY(5px) scale(0.95);
+                transition: opacity 0.2s, transform 0.2s;
+            `;
+
+            // 小尖角箭头
+            const arrow = document.createElement('div');
+            arrow.style.cssText = `
+                position: absolute;
+                top: -5px;
+                right: 20px;
+                width: 10px;
+                height: 10px;
+                background: var(--bg-surface);
+                border-top: 1px solid var(--border-color);
+                border-left: 1px solid var(--border-color);
+                transform: rotate(45deg);
+                z-index: 10001;
+            `;
+
+            const content = document.createElement('div');
+            content.style.cssText = `
+                position: relative;
+                background: var(--bg-surface);
+                border: 1px solid var(--border-color);
+                box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+                border-radius: 8px;
+                padding: 10px 14px;
+                width: ${width}px;
+                font-size: 13px;
+                color: var(--text-main);
+                z-index: 10002;
+            `;
+
+            content.innerHTML = `
+                <div style="margin-bottom: 10px; line-height: 1.4;">${htmlMsg}</div>
+                <div style="display:flex; justify-content:flex-end; gap:6px;">
+                    <button class="btn bubble-cancel" style="padding:2px 8px; font-size:12px; border:1px solid var(--border-color); background:transparent;">取消</button>
+                    <button class="btn btn-primary bubble-confirm" style="padding:2px 8px; font-size:12px;">确定</button>
+                </div>
+            `;
+
+            bubble.appendChild(arrow);
+            bubble.appendChild(content);
+            document.body.appendChild(bubble);
+
+            // 边缘反弹检查
+            const bRect = bubble.getBoundingClientRect();
+            if (bRect.bottom > window.innerHeight) {
+                bubble.style.top = (rect.top - bRect.height - 10) + 'px';
+                arrow.style.top = 'auto';
+                arrow.style.bottom = '-5px';
+                arrow.style.borderTop = 'none';
+                arrow.style.borderLeft = 'none';
+                arrow.style.borderBottom = '1px solid var(--border-color)';
+                arrow.style.borderRight = '1px solid var(--border-color)';
+            }
+            if (bRect.left < 0) {
+                bubble.style.left = '10px';
+                arrow.style.right = (10 + bRect.width - (rect.right - 10)) + 'px';
+            }
+
+            requestAnimationFrame(() => {
+                bubble.style.opacity = '1';
+                bubble.style.transform = 'translateY(0) scale(1)';
+            });
+
+            activeBubble = bubble;
+
+            const cleanup = (result) => {
+                if (activeBubble === bubble) {
+                    bubble.style.opacity = '0';
+                    bubble.style.transform = 'translateY(5px) scale(0.95)';
+                    setTimeout(() => {
+                        if (bubble.parentNode) bubble.parentNode.removeChild(bubble);
+                        if (activeBubble === bubble) activeBubble = null;
+                    }, 200);
+                }
+                document.removeEventListener('click', outsideClick);
+                resolve(result);
+            };
+
+            const outsideClick = (e) => {
+                if (!bubble.contains(e.target) && !targetEl.contains(e.target)) {
+                    cleanup(false);
+                }
+            };
+
+            bubble.querySelector('.bubble-confirm').onclick = () => cleanup(true);
+            bubble.querySelector('.bubble-cancel').onclick = () => cleanup(false);
+
+            setTimeout(() => document.addEventListener('click', outsideClick), 0);
+        });
+    }
+
     function cPrompt(msg, defaultText = '', title = '✏️ 输入信息') {
         console.log('🔵 [cPrompt] 被调用, title:', title);
         return new Promise(resolve => {
@@ -100,6 +214,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const xListPane = document.getElementById('xListPane');
     const xDetailPane = document.getElementById('xDetailPane');
     const twActionControls = document.getElementById('twActionControls');
+
+    // --- 拖拽自动滚动逻辑 (Drag Auto Scroll) ---
+    let dragScrollInterval = null;
+    if (xListPane) {
+        xListPane.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            const rect = xListPane.getBoundingClientRect();
+            const y = e.clientY - rect.top;
+
+            const threshold = 60;
+            const scrollSpeed = 15;
+
+            clearInterval(dragScrollInterval);
+            if (y < threshold) {
+                dragScrollInterval = setInterval(() => { xListPane.scrollTop -= scrollSpeed; }, 20);
+            } else if (y > rect.height - threshold) {
+                dragScrollInterval = setInterval(() => { xListPane.scrollTop += scrollSpeed; }, 20);
+            } else {
+                dragScrollInterval = null;
+            }
+        });
+        const stopScroll = () => { clearInterval(dragScrollInterval); dragScrollInterval = null; };
+        xListPane.addEventListener('dragend', stopScroll);
+        xListPane.addEventListener('drop', stopScroll);
+        window.addEventListener('mouseup', stopScroll);
+    }
 
     // Theme logic
     const toggleBtn = document.getElementById('themeToggleBtn');
@@ -153,16 +293,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     refreshBtn.addEventListener('click', loadData);
 
-    if (openTwitterBtn) {
-        openTwitterBtn.addEventListener('click', () => {
-            chrome.tabs.create({ url: 'https://x.com/i/bookmarks' });
-        });
-    }
-
     const forceReinitBtn = document.getElementById('forceReinitBtn');
     if (forceReinitBtn) {
         forceReinitBtn.addEventListener('click', async () => {
-            const confirmed = await cConfirm('<b>警告：这将会完全清除当前的模型缓存和所有已计算完成的书签嵌入特征，并触发重置。</b><br><br>系统将会清除本地引擎特征索引，并迫使浏览器重新使用 BGE-Small-ZH 模型重新处理你库里那 1000 多条书签。<br><br>确定要执行硬重启吗？', '⚠️ 危险操作');
+            const confirmed = await cConfirm('<b>提示：执行此操作将会清除当前所有的嵌入特征缓存并重新初始化。</b><br><br>下一次分类时，系统将会重新读取你的所有书签进行全量特征提取，这可能会花费较多时间。<br><br>确定要重建配置与索引吗？', '⚙️ 重建配置/索引');
             if (confirmed) {
                 forceReinitBtn.innerText = '⚠️ 正在清空并重启引擎...';
                 forceReinitBtn.disabled = true;
@@ -255,7 +389,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (rawCountLabel) {
                         rawCountLabel.parentElement.innerHTML = `
                             <div style="font-size: 40px; margin-bottom: 20px;">🐦</div>
-                            <div>你还没有同步过推特知识库哦。<br><br>点击右上角的 <b style="color:var(--accent);">同步新的推特书签</b> 按钮去同步吧！</div>
+                            <div>你还没有同步过推特知识库哦。<br><br>插件会在后台自动抓取，请稍后再来看看吧。</div>
                         `;
                     }
                 } else {
@@ -274,6 +408,79 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderTwitterFolderSection(categoryName, bookmarks, isUserFolder, containerEl) {
         const div = document.createElement('div');
         div.className = 'folder-item';
+        div.setAttribute('data-name', categoryName);
+        div.setAttribute('data-isuser', isUserFolder);
+
+        // Drag-and-drop dropzone setup for this folder
+        div.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            div.style.borderColor = 'var(--accent)';
+        });
+        div.addEventListener('dragleave', (e) => {
+            if (!div.contains(e.relatedTarget)) {
+                div.style.borderColor = '';
+            }
+        });
+        div.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            div.style.borderColor = '';
+
+            try {
+                const dataStr = e.dataTransfer.getData('text/plain');
+                if (!dataStr) return;
+                const { bmId, sourceCategory } = JSON.parse(dataStr);
+                const targetCategory = div.getAttribute('data-name');
+                const isTargetUserFolder = div.getAttribute('data-isuser') === 'true';
+
+                if (!bmId || sourceCategory === targetCategory) return;
+
+                // Optimistically move node in DOM
+                const movedItem = document.querySelector(`.tw-list-item .inline-dispatch-btn[data-id="${bmId}"]`)?.closest('.tw-list-item');
+                if (movedItem) {
+                    const contentContainer = div.querySelector('.folder-content');
+                    const sourceFolderContent = movedItem.closest('.folder-content');
+
+                    if (sourceFolderContent) {
+                        const status = sourceFolderContent.previousElementSibling?.querySelector('.folder-status');
+                        if (status) {
+                            let c = parseInt(status.innerText);
+                            if (!isNaN(c) && c > 0) status.innerText = (c - 1) + ' 条';
+                        }
+                    }
+                    if (contentContainer) {
+                        contentContainer.insertBefore(movedItem, contentContainer.firstChild);
+                    }
+                    movedItem.setAttribute('data-category', targetCategory);
+                    const destStatus = div.querySelector('.folder-title .folder-status');
+                    if (destStatus) {
+                        let c = parseInt(destStatus.innerText);
+                        if (!isNaN(c)) destStatus.innerText = (c + 1) + ' 条';
+                    }
+                }
+
+                // If dropping into a real user folder, sync it instantly
+                if (isTargetUserFolder) {
+                    chrome.runtime.sendMessage({
+                        type: 'SYNC_MULTIPLE_TWITTER_FOLDERS',
+                        folders: { [targetCategory]: [bmId] }
+                    }, (res) => {
+                        if (!res || !res.success) cAlert('❌ 移动失败: ' + res?.error);
+                    });
+                } else {
+                    // Dropping into a draft folder, update JS state
+                    if (window.currentDrafts[sourceCategory]) {
+                        window.currentDrafts[sourceCategory] = window.currentDrafts[sourceCategory].filter(id => id !== bmId);
+                    }
+                    if (!window.currentDrafts[targetCategory]) window.currentDrafts[targetCategory] = [];
+                    if (!window.currentDrafts[targetCategory].includes(bmId)) {
+                        window.currentDrafts[targetCategory].push(bmId);
+                    }
+                }
+            } catch (err) { }
+        });
+
         const bmIds = bookmarks.map(b => b.id);
         const borderColor = isUserFolder ? 'var(--success-text)' : 'var(--warning-text)';
         const badge = isUserFolder ? '已保存' : '待保存草稿';
@@ -313,7 +520,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
 
             return `
-                <div class="tw-list-item" data-bm='${bmDataStr}' title="点击查看详情">
+                <div class="tw-list-item" data-bm='${bmDataStr}' title="允许拖拽以重分类 / 点击查看详情" draggable="true" data-category="${escapeHtml(categoryName)}">
                     <div class="list-col" style="color:var(--text-sec); font-family:monospace; justify-content:center;">${i + 1}</div>
                     
                     <div class="list-col" style="gap:10px;">
@@ -333,6 +540,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="list-col" style="color:var(--text-sec); font-family:monospace;">${meta.views !== '-' ? meta.views : '-'}</div>
                     <div class="list-col" style="color:var(--text-sec); font-family:monospace;">${meta.retweets !== '-' ? meta.retweets : '-'}</div>
                     <div class="list-col" style="color:var(--text-sec); font-family:monospace;">${meta.likes !== '-' ? meta.likes : '-'}</div>
+                    
+                    <div class="list-col" style="display:flex; gap:6px;">
+                        <button class="btn btn-primary inline-dispatch-btn" data-id="${b.id}" style="padding: 4px 6px; font-size:11px;" title="基于大模型语义将本条推文分类入库">🪄 智能分类</button>
+                        <button class="btn btn-danger inline-delete-btn" data-id="${b.id}" style="padding: 4px 6px; font-size:11px;" title="在浏览器本地记录中删除书签，不会影响推特本身">🗑️ 删除记录</button>
+                    </div>
                 </div>`;
         }).join('') : `<div style="padding: 20px; color: var(--text-sec); text-align:center;">暂无推文</div>`;
 
@@ -360,6 +572,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div>阅读量</div>
                     <div>转发</div>
                     <div>点赞</div>
+                    <div>操作</div>
                 </div>
                 ` : ''}
                 ${bmsHtml}
@@ -474,14 +687,98 @@ document.addEventListener('DOMContentLoaded', () => {
         // 注入到 DOM 后，再绑定详细推文的点击事件（Twillot大视图）
         const twListItems = div.querySelectorAll('.tw-list-item');
         twListItems.forEach(item => {
-            item.addEventListener('click', function () {
+            const data = JSON.parse(item.getAttribute('data-bm').replace(/&quot;/g, '"').replace(/&#39;/g, "'"));
+
+            item.addEventListener('dragstart', function (e) {
+                if (e.target.closest('button') || e.target.closest('a')) {
+                    e.preventDefault();
+                    return;
+                }
+                const category = this.getAttribute('data-category');
+                e.dataTransfer.setData('text/plain', JSON.stringify({ bmId: data.id, sourceCategory: category }));
+                e.dataTransfer.effectAllowed = 'move';
+
+                const currentContent = this.closest('.folder-content');
+                document.querySelectorAll('.folder-content').forEach(content => {
+                    if (content !== currentContent && content.classList.contains('open')) {
+                        content.classList.remove('open');
+                    }
+                });
+
+                setTimeout(() => this.style.opacity = '0.4', 0);
+            });
+            item.addEventListener('dragend', function (e) {
+                this.style.opacity = '1';
+                document.querySelectorAll('.folder-item').forEach(el => el.style.borderColor = '');
+            });
+
+            item.addEventListener('click', function (e) {
+                if (e.target.closest('button')) {
+                    return;
+                }
                 // 移除其他选中态
                 document.querySelectorAll('.tw-list-item').forEach(el => el.classList.remove('selected'));
                 this.classList.add('selected');
-
-                const data = JSON.parse(this.getAttribute('data-bm').replace(/&quot;/g, '"').replace(/&#39;/g, "'"));
                 renderDetailPane(data, this);
             });
+
+            const dispatchBtn = item.querySelector('.inline-dispatch-btn');
+            if (dispatchBtn) {
+                dispatchBtn.addEventListener('click', async function (e) {
+                    e.stopPropagation();
+                    const origText = this.innerText;
+                    this.innerText = '⏳ 匹配中..';
+                    this.disabled = true;
+                    chrome.runtime.sendMessage({ type: 'SMART_DISPATCH_SINGLE_TWITTER', bookmarkId: data.id }, async (res) => {
+                        if (res && res.success) {
+                            const p = Math.round(res.confidence * 100);
+                            const confirmed = await cBubbleConfirm(dispatchBtn, `🎯 <b>语义匹配完成！</b><br><br>将移动至：<br>📁 <b style="color:var(--accent);">${res.suggestedFolder}</b> (${p}% 契合度)<br><br>确定吗？`);
+                            if (confirmed) {
+                                dispatchBtn.innerText = '⏳ 移动中..';
+                                chrome.runtime.sendMessage({ type: 'MOVE_BOOKMARK', bookmarkId: data.id, parentId: res.suggestedFolderId }, async (mv) => {
+                                    if (mv && mv.success) {
+                                        item.style.opacity = '0';
+                                        setTimeout(() => item.remove(), 300);
+                                    } else {
+                                        await cAlert('❌ 移动失败：' + mv?.error);
+                                        dispatchBtn.innerText = origText;
+                                        dispatchBtn.disabled = false;
+                                    }
+                                });
+                            } else {
+                                dispatchBtn.innerText = origText;
+                                dispatchBtn.disabled = false;
+                            }
+                        } else {
+                            await cAlert('❌ 匹配落选：' + (res?.error || '未知错误'));
+                            dispatchBtn.innerText = origText;
+                            dispatchBtn.disabled = false;
+                        }
+                    });
+                });
+            }
+
+            const deleteBtn = item.querySelector('.inline-delete-btn');
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', async function (e) {
+                    e.stopPropagation();
+                    const confirmed = await cBubbleConfirm(deleteBtn, `确定要将这条记录<br>从书签库中删除吗？<br><br><span style="color:var(--text-sec); font-size:11px;">注：这仅删除本地记录，<b>不会</b>影响推特平台本身。</span>`, 220);
+                    if (confirmed) {
+                        this.innerText = '⏳..';
+                        this.disabled = true;
+                        chrome.runtime.sendMessage({ type: 'DELETE_BOOKMARK', bookmarkId: data.id }, async (res) => {
+                            if (res && res.success) {
+                                item.style.opacity = '0';
+                                setTimeout(() => item.remove(), 300);
+                            } else {
+                                await cAlert('❌ 删除失败：' + res?.error);
+                                deleteBtn.innerText = '🗑️ 删除记录';
+                                deleteBtn.disabled = false;
+                            }
+                        });
+                    }
+                });
+            }
         });
 
         // Delete folder
@@ -568,8 +865,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
 
                 <div class="detail-actions">
-                    <button class="btn btn-primary btn-dispatch-detail" data-id="${data.id}">🪄 智能移动至主库</button>
-                    <button class="btn btn-danger btn-delete-bm-detail" data-id="${data.id}">🗑️ 永久删除此推</button>
+                    <button class="btn btn-primary btn-dispatch-detail" data-id="${data.id}">🪄 智能分类</button>
+                    <button class="btn btn-danger btn-delete-bm-detail" data-id="${data.id}">🗑️ 删除记录</button>
                 </div>
             </div>
         `;
@@ -590,7 +887,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 chrome.runtime.sendMessage({ type: 'SMART_DISPATCH_SINGLE_TWITTER', bookmarkId: id }, async (res) => {
                     if (res && res.success) {
                         const p = Math.round(res.confidence * 100);
-                        const confirmed = await cConfirm(`🎯 <b>语义匹配成功！</b><br><br>推荐主库分类：<br>📁 <b style="color:var(--accent);">${res.suggestedFolder}</b> (${p}% 契合度)<br><br>是否同意派发？`);
+                        const confirmed = await cBubbleConfirm(dispatchBtn, `🎯 <b>语义匹配完成！</b><br><br>将移动至：<br>📁 <b style="color:var(--accent);">${res.suggestedFolder}</b> (${p}% 契合度)<br><br>确定吗？`);
                         if (confirmed) {
                             chrome.runtime.sendMessage({ type: 'MOVE_BOOKMARK', bookmarkId: id, parentId: res.suggestedFolderId }, async (mv) => {
                                 if (mv && mv.success) {
@@ -604,12 +901,12 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
                             });
                         } else {
-                            this.innerText = '🪄 智能移动至主库';
+                            this.innerText = '🪄 智能分类';
                             this.disabled = false;
                         }
                     } else {
                         await cAlert('❌ 匹配落选：' + (res?.error || '未知错误'));
-                        this.innerText = '🪄 智能移动至主库';
+                        this.innerText = '🪄 智能分类';
                         this.disabled = false;
                     }
                 });
@@ -620,7 +917,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (deleteBmBtn) {
             deleteBmBtn.addEventListener('click', async function () {
                 const id = this.getAttribute('data-id');
-                const confirmed = await cConfirm(`确定要永久删除这条推文书签吗？<br><br>这将在浏览器中真实地将其抹除！`);
+                const confirmed = await cBubbleConfirm(deleteBmBtn, `确定要将这条记录<br>从书签库中删除吗？<br><br><span style="color:var(--text-sec); font-size:12px;">注：这仅仅是删除本地记录，<b>不会</b>影响你在推特平台本身的点赞或收藏。</span>`, 240);
                 if (confirmed) {
                     this.innerText = '⏳ 删除中..';
                     this.disabled = true;

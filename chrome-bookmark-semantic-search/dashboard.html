@@ -343,7 +343,7 @@
             border-bottom: 1px solid var(--border-color);
             cursor: pointer;
             display: grid;
-            grid-template-columns: 36px 200px minmax(250px, 1fr) 80px 80px 80px 80px;
+            grid-template-columns: 36px 200px minmax(200px, 1fr) 60px 60px 60px 60px 180px;
             gap: 16px;
             align-items: center;
             transition: 0.2s;
@@ -352,7 +352,7 @@
 
         .tw-list-header-row {
             display: grid;
-            grid-template-columns: 36px 200px minmax(250px, 1fr) 80px 80px 80px 80px;
+            grid-template-columns: 36px 200px minmax(200px, 1fr) 60px 60px 60px 60px 180px;
             gap: 16px;
             padding: 14px 20px;
             border-bottom: 2px solid var(--border-color);
@@ -746,40 +746,49 @@
 
 <body>
     <div class="container">
-        <div
-            style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--border-color); margin-bottom: 24px; flex-wrap: wrap; gap: 15px;">
-            <div style="display: flex; align-items: center; gap: 24px;">
-                <h1>🌍 智能书签数据库</h1>
-                <div
-                    style="display: flex; gap: 16px; align-items: center; font-size: 13px; color: var(--text-sec); background: var(--bg-surface-hover); padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="display: flex; align-items: baseline; gap: 6px;">总书签: <b id="totalBookmarks"
-                            style="font-size: 16px; color: var(--text-main); font-weight: 600;">-</b></div>
-                    <div style="width: 1px; height: 14px; background: var(--border-color);"></div>
-                    <div style="display: flex; align-items: baseline; gap: 6px;">推特书签: <b id="totalXBookmarks"
-                            style="font-size: 16px; color: var(--accent); font-weight: 600;">-</b></div>
-                    <div style="width: 1px; height: 14px; background: var(--border-color);"></div>
-                    <div style="display: flex; align-items: baseline; gap: 6px;">分类夹: <b id="totalFolders"
-                            style="font-size: 16px; color: var(--text-main); font-weight: 600;">-</b></div>
-                    <div style="width: 1px; height: 14px; background: var(--border-color);"></div>
-                    <div style="display: flex; align-items: baseline; gap: 6px;">引擎状态: <span id="engineStatus"
-                            style="font-size: 13px; font-weight: 600; color: var(--text-main);">检查中...</span></div>
+        <div style="padding-bottom: 20px; border-bottom: 1px solid var(--border-color); margin-bottom: 24px;">
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px;">
+
+                <!-- Left: Title & Compact Stats -->
+                <div style="display: flex; align-items: center; gap: 16px; flex-shrink: 0;">
+                    <h1 style="margin:0; white-space: nowrap; font-size: 20px;">🌍 智能书签数据库</h1>
+                    <div
+                        style="display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--text-sec); background: var(--bg-surface-hover); padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+                        <div style="display: flex; align-items: baseline; gap: 4px;">总计: <b id="totalBookmarks"
+                                style="font-size: 13px; color: var(--text-main); font-weight: 600;">-</b></div>
+                        <div style="width: 1px; height: 12px; background: var(--border-color);"></div>
+                        <div style="display: flex; align-items: baseline; gap: 4px;">推特: <b id="totalXBookmarks"
+                                style="font-size: 13px; color: var(--accent); font-weight: 600;">-</b></div>
+                        <div style="width: 1px; height: 12px; background: var(--border-color);"></div>
+                        <div style="display: flex; align-items: baseline; gap: 4px;">分类夹: <b id="totalFolders"
+                                style="font-size: 13px; color: var(--text-main); font-weight: 600;">-</b></div>
+                        <div style="width: 1px; height: 12px; background: var(--border-color);"></div>
+                        <div style="display: flex; align-items: baseline; gap: 4px;"><span id="engineStatus"
+                                style="font-size: 12px; font-weight: 600; color: var(--text-main);">检查中...</span></div>
+                    </div>
+                </div>
+
+                <!-- Middle: Search Box -->
+                <div class="search-box"
+                    style="flex: 1; max-width: 600px; display: flex; gap: 8px; align-items: center; min-width: 250px;">
+                    <input type="text" id="dashSearchInput" placeholder="🤖 用自然语言搜索你的知识库..."
+                        style="flex: 1; padding: 10px 16px; font-size: 14px; border: 2px solid var(--accent); border-radius: 6px; outline: none; transition: 0.2s; background: var(--bg-surface); color: var(--text-main); box-shadow: 0 4px 12px rgba(29, 155, 240, 0.15);"
+                        onfocus="this.style.boxShadow='0 4px 16px rgba(29, 155, 240, 0.3)'"
+                        onblur="this.style.boxShadow='0 4px 12px rgba(29, 155, 240, 0.15)'">
+                    <button class="btn btn-primary" id="dashSearchBtn"
+                        style="padding: 10px 20px; font-size: 14px; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(29, 155, 240, 0.2);">🔍
+                        语义搜索</button>
+                </div>
+
+                <!-- Right: Actions -->
+                <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
+                    <button class="btn btn-icon" id="themeToggleBtn" title="切换暗色/亮色模式" style="padding: 8px;">🌙</button>
+                    <button class="btn" id="refreshBtn" style="padding: 8px 12px;">🔄 刷新数据</button>
+                    <button class="btn btn-danger" id="forceReinitBtn" title="清除模型缓存并重新处理未分类书签"
+                        style="padding: 8px 12px;">⚙️ 重建索引</button>
                 </div>
             </div>
-            <div style="display: flex; gap: 10px; align-items: center;">
-                <button class="btn btn-icon" id="themeToggleBtn" title="切换暗色/亮色模式">🌙</button>
-                <button class="btn" id="refreshBtn">🔄 刷新数据</button>
-                <button class="btn btn-primary" id="openTwitterBtn">🐦 同步新的推特书签</button>
-                <button class="btn btn-danger" id="forceReinitBtn" title="清除模型缓存并重新下载配置新的特征提取模型">⚠️ 强制重置</button>
-            </div>
-        </div>
-
-        <div class="search-box" style="margin-bottom: 25px; display: flex; gap: 10px; align-items: center;">
-            <input type="text" id="dashSearchInput" placeholder="🤖 试试用自然语言描述你想找的书签内容..."
-                style="flex: 1; padding: 14px 20px; font-size: 16px; border: 2px solid var(--border-color); border-radius: 8px; outline: none; transition: 0.2s; background: var(--bg-surface); color: var(--text-main);"
-                onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border-color)'">
-            <button class="btn btn-primary" id="dashSearchBtn"
-                style="padding: 14px 30px; font-size: 16px; display: flex; align-items: center; gap: 8px;">🔍
-                语义搜索</button>
         </div>
 
         <div

@@ -60,35 +60,77 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg-surface);
+            background: var(--bg-main);
             color: var(--text-main);
-            padding: 0;
+            padding: 30px;
             margin: 0;
-            height: 100vh;
-            overflow: hidden;
             transition: background 0.3s, color 0.3s;
         }
 
         .container {
-            width: 100%;
-            height: 100%;
+            max-width: 1500px;
+            width: 98%;
+            margin: 0 auto;
             background: var(--bg-surface);
-            padding: 24px 32px;
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border-color);
         }
 
         h1 {
-            margin: 0;
+            margin-top: 0;
             color: var(--text-main);
-            font-size: 20px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 22px;
             font-weight: 600;
+        }
+
+        .stats {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .stat-box {
+            flex: 1;
+            background: var(--bg-surface-hover);
+            padding: 16px;
+            border-radius: 10px;
+            text-align: center;
+            border: 1px solid var(--border-color);
+            transition: transform 0.2s;
+        }
+
+        .stat-box:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .stat-box h3 {
+            margin: 0 0 8px;
+            font-size: 13px;
+            color: var(--text-sec);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-box .num {
+            font-size: 26px;
+            font-weight: 700;
+            color: var(--accent);
         }
 
         .tabs {
             display: flex;
             gap: 8px;
+            margin-bottom: 25px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 12px;
         }
 
         .tab-btn {
@@ -131,17 +173,13 @@
         }
 
         .view-section.active {
-            display: flex;
-            flex-direction: column;
-            flex: 1;
-            min-height: 0;
+            display: block;
         }
 
         .index-view {
             border: 1px solid var(--border-color);
             border-radius: 10px;
-            flex: 1;
-            min-height: 0;
+            height: 620px;
             overflow-y: auto;
             background: var(--bg-surface);
         }
@@ -240,126 +278,42 @@
             white-space: nowrap;
         }
 
-        /* Twillot-like Wide List and Drawer Logic */
-        .tw-list-layout {
-            flex: 1;
-            min-height: 0;
+        /* Twillot-like Split View Logic */
+        .tw-split-layout {
+            display: flex;
+            height: 620px;
             border: 1px solid var(--border-color);
             border-radius: 10px;
-            overflow-y: auto;
+            overflow: hidden;
             background: var(--bg-surface);
         }
 
         .tw-list-pane {
-            display: flex;
-            flex-direction: column;
-        }
-
-        /* Drawer overlay and panel */
-        .drawer-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.4);
-            z-index: 1000;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.3s;
-            backdrop-filter: blur(4px);
-            -webkit-backdrop-filter: blur(4px);
-        }
-
-        .drawer-overlay.open {
-            opacity: 1;
-            visibility: visible;
-        }
-
-        .drawer-panel {
-            position: fixed;
-            top: 0;
-            right: -650px;
-            width: 100%;
-            max-width: 600px;
-            height: 100%;
-            background: var(--bg-surface);
-            box-shadow: -5px 0 25px rgba(0, 0, 0, 0.2);
-            z-index: 1001;
-            transition: right 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-            display: flex;
-            flex-direction: column;
-        }
-
-        .drawer-panel.open {
-            right: 0;
-        }
-
-        .drawer-header {
-            padding: 16px 24px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: var(--bg-surface-hover);
-        }
-
-        .drawer-title {
-            font-size: 16px;
-            font-weight: 600;
-            margin: 0;
-            color: var(--text-main);
-        }
-
-        .drawer-close {
-            background: transparent;
-            border: none;
-            font-size: 24px;
-            color: var(--text-sec);
-            cursor: pointer;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: 0.2s;
-        }
-
-        .drawer-close:hover {
-            background: var(--bg-active);
-            color: var(--text-main);
-        }
-
-        .drawer-body {
-            padding: 24px;
-            overflow-y: auto;
             flex: 1;
+            max-width: 480px;
+            min-width: 320px;
+            border-right: 1px solid var(--border-color);
+            overflow-y: auto;
+            background: var(--bg-surface-hover);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .tw-detail-pane {
+            flex: 2;
+            overflow-y: auto;
             background: var(--bg-surface);
+            position: relative;
         }
 
         .tw-list-item {
-            padding: 12px 20px;
+            padding: 15px 20px;
             border-bottom: 1px solid var(--border-color);
             cursor: pointer;
-            display: grid;
-            grid-template-columns: 36px 200px minmax(250px, 1fr) 80px 80px 80px 80px;
-            gap: 16px;
-            align-items: center;
+            display: flex;
+            gap: 12px;
             transition: 0.2s;
             background: transparent;
-        }
-
-        .tw-list-header-row {
-            display: grid;
-            grid-template-columns: 36px 200px minmax(250px, 1fr) 80px 80px 80px 80px;
-            gap: 16px;
-            padding: 14px 20px;
-            border-bottom: 2px solid var(--border-color);
-            background: var(--bg-surface-hover);
-            color: var(--text-sec);
-            font-size: 13px;
-            font-weight: 600;
         }
 
         .tw-list-item:hover {
@@ -406,39 +360,20 @@
             text-overflow: ellipsis;
         }
 
+        .list-handle {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
         .list-snippet {
             font-size: 13px;
-            color: var(--text-main);
+            color: var(--text-sec);
             display: -webkit-box;
             -webkit-line-clamp: 2;
             line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
-            line-height: 1.5;
-            word-break: break-word;
-        }
-
-        .list-col {
-            display: flex;
-            align-items: center;
-            font-size: 13px;
-            color: var(--text-main);
-            min-width: 0;
-        }
-
-        .list-badge-col {
-            padding: 2px 8px;
-            border-radius: 4px;
-            background: var(--bg-surface-hover);
-            color: var(--text-sec);
-            font-size: 12px;
-            border: 1px solid var(--border-color);
-            display: inline-block;
-            text-align: center;
-            max-width: 100%;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            line-height: 1.4;
         }
 
         .list-folder-badge {
@@ -746,30 +681,32 @@
 
 <body>
     <div class="container">
-        <div
-            style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--border-color); margin-bottom: 24px; flex-wrap: wrap; gap: 15px;">
-            <div style="display: flex; align-items: center; gap: 24px;">
-                <h1>🌍 智能书签数据库</h1>
-                <div
-                    style="display: flex; gap: 16px; align-items: center; font-size: 13px; color: var(--text-sec); background: var(--bg-surface-hover); padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="display: flex; align-items: baseline; gap: 6px;">总书签: <b id="totalBookmarks"
-                            style="font-size: 16px; color: var(--text-main); font-weight: 600;">-</b></div>
-                    <div style="width: 1px; height: 14px; background: var(--border-color);"></div>
-                    <div style="display: flex; align-items: baseline; gap: 6px;">推特书签: <b id="totalXBookmarks"
-                            style="font-size: 16px; color: var(--accent); font-weight: 600;">-</b></div>
-                    <div style="width: 1px; height: 14px; background: var(--border-color);"></div>
-                    <div style="display: flex; align-items: baseline; gap: 6px;">分类夹: <b id="totalFolders"
-                            style="font-size: 16px; color: var(--text-main); font-weight: 600;">-</b></div>
-                    <div style="width: 1px; height: 14px; background: var(--border-color);"></div>
-                    <div style="display: flex; align-items: baseline; gap: 6px;">引擎状态: <span id="engineStatus"
-                            style="font-size: 13px; font-weight: 600; color: var(--text-main);">检查中...</span></div>
-                </div>
-            </div>
+        <h1>
+            <span>🌍 智能书签数据库</span>
             <div style="display: flex; gap: 10px; align-items: center;">
                 <button class="btn btn-icon" id="themeToggleBtn" title="切换暗色/亮色模式">🌙</button>
                 <button class="btn" id="refreshBtn">🔄 刷新数据</button>
                 <button class="btn btn-primary" id="openTwitterBtn">🐦 同步新的推特书签</button>
                 <button class="btn btn-danger" id="forceReinitBtn" title="清除模型缓存并重新下载配置新的特征提取模型">⚠️ 强制重置</button>
+            </div>
+        </h1>
+
+        <div class="stats">
+            <div class="stat-box">
+                <h3>已纳管书签总数</h3>
+                <div class="num" id="totalBookmarks">-</div>
+            </div>
+            <div class="stat-box">
+                <h3>X / 推特 书签数</h3>
+                <div class="num" id="totalXBookmarks" style="color: var(--accent);">-</div>
+            </div>
+            <div class="stat-box">
+                <h3>识别出的分类夹</h3>
+                <div class="num" id="totalFolders">-</div>
+            </div>
+            <div class="stat-box">
+                <h3>引擎状态</h3>
+                <div class="num" id="engineStatus" style="font-size: 16px; line-height: 38px;">检查中...</div>
             </div>
         </div>
 
@@ -782,26 +719,10 @@
                 语义搜索</button>
         </div>
 
-        <div
-            style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 0;">
-            <div class="tabs">
-                <button class="tab-btn active" data-target="tab-folders"
-                    style="border-bottom-left-radius:0; border-bottom-right-radius:0; padding-bottom:12px;">📁
-                    语义折叠树</button>
-                <button class="tab-btn" data-target="tab-twitter"
-                    style="border-bottom-left-radius:0; border-bottom-right-radius:0; padding-bottom:12px;">🐦 推特/X
-                    知识库</button>
-                <button class="tab-btn" data-target="tab-search" id="tabSearchBtn"
-                    style="display: none; border-bottom-left-radius:0; border-bottom-right-radius:0; padding-bottom:12px;">🔍
-                    搜索结果</button>
-            </div>
-
-            <div id="tab-twitter-controls" style="display: none; align-items: center; gap: 10px; padding-bottom: 8px;">
-                <button class="btn btn-success" id="categorizeTwitterBtn"
-                    style="color: white; border-color: transparent; padding: 6px 12px; font-size: 13px;">🔮
-                    基于大模型生成虚拟分类树</button>
-                <div id="twActionControls" style="display: none; gap: 8px;"></div>
-            </div>
+        <div class="tabs">
+            <button class="tab-btn active" data-target="tab-folders">📁 语义折叠树</button>
+            <button class="tab-btn" data-target="tab-twitter">🐦 推特/X 知识库</button>
+            <button class="tab-btn" data-target="tab-search" id="tabSearchBtn" style="display: none;">🔍 搜索结果</button>
         </div>
 
         <div id="tab-folders" class="view-section active">
@@ -809,30 +730,34 @@
         </div>
 
         <div id="tab-twitter" class="view-section">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <p style="color: var(--text-sec); margin: 0; font-size: 14px;">专属推特/X 知识库。左侧浏览列表，右侧查看详情并进行管理，体验大气舒畅。</p>
+                <div style="display: flex; gap: 8px;">
+                    <!-- Controls will be injected here if clustered -->
+                    <button class="btn btn-success" id="categorizeTwitterBtn"
+                        style="color: white; border-color: transparent;">🔮 基于大模型生成虚拟分类树</button>
+                </div>
+            </div>
+
             <div id="twitterCategorizeStatus" class="status-banner status-success" style="display: none;">
                 <!-- Status innerHTML goes here -->
             </div>
+            <div id="twActionControls" style="display: none; gap: 10px; margin-bottom: 15px;"></div>
 
-            <!-- Wide List View layout -->
-            <div class="tw-list-layout" id="xViewSplit">
+            <!-- New Split View layout for Twillot style -->
+            <div class="tw-split-layout" id="xViewSplit">
                 <div class="tw-list-pane" id="xListPane">
-                    <div style="padding: 60px; text-align: center; color: var(--text-sec);">
+                    <div style="padding: 40px; text-align: center; color: var(--text-sec);">
                         <div style="font-size: 30px; margin-bottom: 15px;">📊</div>
                         <div id="rawCountLabel">加载中...</div>
                         <div style="margin-top: 10px; font-size: 13px;">点击上方 <b>🔮 聚类按钮</b> 开始智能分类</div>
                     </div>
                 </div>
-            </div>
-
-            <!-- Drawer for Details -->
-            <div id="twDrawerOverlay" class="drawer-overlay"></div>
-            <div id="twDrawerPanel" class="drawer-panel">
-                <div class="drawer-header">
-                    <h3 class="drawer-title">推文详情</h3>
-                    <button id="twDrawerClose" class="drawer-close">&times;</button>
-                </div>
-                <div class="drawer-body" id="xDetailPane">
-                    <!-- Detail content injected here -->
+                <div class="tw-detail-pane" id="xDetailPane">
+                    <div class="detail-empty">
+                        <div style="font-size: 40px; margin-bottom: 15px; opacity: 0.5;">👈</div>
+                        <div>点击左侧列表查看详细推文内容</div>
+                    </div>
                 </div>
             </div>
         </div>

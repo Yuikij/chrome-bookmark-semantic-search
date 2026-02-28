@@ -136,18 +136,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Tab 切换逻辑
     const tabBtns = document.querySelectorAll('.tab-btn');
-    const tabTwitterControls = document.getElementById('tab-twitter-controls');
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
             btn.classList.add('active');
-            const target = btn.getAttribute('data-target');
-            document.getElementById(target).classList.add('active');
-
-            if (tabTwitterControls) {
-                tabTwitterControls.style.display = target === 'tab-twitter' ? 'flex' : 'none';
-            }
+            document.getElementById(btn.getAttribute('data-target')).classList.add('active');
         });
     });
 
@@ -293,12 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const match = text.match(/\[X推文\]\s*(.*?):\s*(.*)/);
-            if (match) {
-                author = match[1];
-                text = meta.fullText || match[2]; // 优先提取 metadata 中的完整内容
-            } else if (meta.fullText) {
-                text = meta.fullText; // 退路：如果没有作者结构但是存了完整文本
-            }
+            if (match) { author = match[1]; text = match[2]; }
 
             let handle = '';
             const handleMatch = b.url.match(/https?:\/\/(?:twitter|x)\.com\/([^\/]+)/i);
@@ -314,25 +303,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
             return `
                 <div class="tw-list-item" data-bm='${bmDataStr}' title="点击查看详情">
-                    <div class="list-col" style="color:var(--text-sec); font-family:monospace; justify-content:center;">${i + 1}</div>
-                    
-                    <div class="list-col" style="gap:10px;">
-                        ${avatarUrl ? `<img src="${avatarUrl}" class="list-avatar avatar-img" />` : `<div class="list-avatar">${author.charAt(0).toUpperCase()}</div>`}
-                        <div style="display:flex; flex-direction:column; min-width:0;">
-                            <span class="list-name">${escapeHtml(author)}</span>
-                            ${handle ? `<span style="font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">@${escapeHtml(handle)}</span>` : ''}
+                    ${avatarUrl ? `<img src="${avatarUrl}" class="list-avatar avatar-img" />` : `<div class="list-avatar">${author.charAt(0).toUpperCase()}</div>`}
+                    <div class="list-content">
+                        <div class="list-header">
+                            <div style="display:flex; flex-direction:column;">
+                                <span class="list-name">${escapeHtml(author)}</span>
+                                ${handle ? `<span class="list-handle">@${escapeHtml(handle)}</span>` : ''}
+                            </div>
+                            <span style="font-size:12px; color:var(--text-muted); white-space:nowrap;">${meta.views !== '-' ? meta.views : ''}</span>
                         </div>
+                        <div class="list-snippet">${escapeHtml(text)}</div>
+                        ${meta.mediaUrl ? '<div style="font-size:12px; color:var(--accent); margin-top:4px;">🖼️ 包含媒体内容</div>' : ''}
                     </div>
-
-                    <div class="list-snippet" style="min-width:0; align-self:center;">${escapeHtml(text)}</div>
-
-                    <div class="list-col" style="justify-content:center;">
-                        ${meta.mediaUrl ? `<img src="${meta.mediaUrl}" style="height:32px; width:48px; object-fit:cover; border-radius:4px; border:1px solid var(--border-color);"/>` : `<span style="color:var(--text-muted);">-</span>`}
-                    </div>
-
-                    <div class="list-col" style="color:var(--text-sec); font-family:monospace;">${meta.views !== '-' ? meta.views : '-'}</div>
-                    <div class="list-col" style="color:var(--text-sec); font-family:monospace;">${meta.retweets !== '-' ? meta.retweets : '-'}</div>
-                    <div class="list-col" style="color:var(--text-sec); font-family:monospace;">${meta.likes !== '-' ? meta.likes : '-'}</div>
                 </div>`;
         }).join('') : `<div style="padding: 20px; color: var(--text-sec); text-align:center;">暂无推文</div>`;
 
@@ -343,25 +325,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="folder-status">${bookmarks.length}</span>
                     <span style="font-size:10px; padding:2px 6px; border-radius:4px; ${badgeStyle}">${badge}</span>
                 </div>
-                <div style="display:flex; gap: 6px;">
+            </div>
+            <div class="folder-content">
+                <div style="padding: 8px; border-bottom: 1px solid var(--border-color); background: var(--bg-surface); display:flex; gap: 6px; flex-wrap: wrap;">
                     <button class="btn btn-rename" data-oldname="${escapeHtml(categoryName)}" data-isuser="${isUserFolder}" style="padding: 4px 8px; font-size: 11px;">✏️ 命名</button>
                     ${isUserFolder ? `<button class="btn btn-save-rename btn-success" data-oldname="${escapeHtml(categoryName)}" data-actual-old="${escapeHtml(categoryName)}" style="display:none; padding: 4px 8px; font-size: 11px;">💾 保存名字</button>` : ''}
                     ${!isUserFolder ? `<button class="btn btn-sync-folder btn-success" data-name="${escapeHtml(categoryName)}" data-ids='${JSON.stringify(bmIds)}' style="padding: 4px 8px; font-size: 11px;">💾 归档入库</button>` : ''}
                     <button class="btn btn-delete-folder" data-name="${escapeHtml(categoryName)}" data-isuser="${isUserFolder}" style="padding: 4px 8px; font-size: 11px; color: var(--danger-btn);">🗑️ 删除</button>
                 </div>
-            </div>
-            <div class="folder-content">
-                ${bookmarks.length > 0 ? `
-                <div class="tw-list-header-row">
-                    <div style="text-align:center;">#</div>
-                    <div>用户</div>
-                    <div>内容摘要</div>
-                    <div style="text-align:center;">媒体</div>
-                    <div>阅读量</div>
-                    <div>转发</div>
-                    <div>点赞</div>
-                </div>
-                ` : ''}
                 ${bmsHtml}
             </div>`;
 

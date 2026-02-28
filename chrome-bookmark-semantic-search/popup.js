@@ -63,41 +63,180 @@ class BookmarkSearchUI {
       }
     });
 
-    // 检查当前页面是否为推特/X书签页面
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0] && (tabs[0].url.includes('x.com/i/bookmarks') || tabs[0].url.includes('twitter.com/i/bookmarks'))) {
-        const twActions = document.getElementById('twitterActionsSection');
-        if (twActions) {
-          twActions.style.display = 'block';
+    // === Twitter/X API 书签同步按钮 ===
+    // 不再需要用户在书签页面，直接通过 GraphQL API 抓取
+    const twActions = document.getElementById('twitterActionsSection');
+    if (twActions) {
+      twActions.style.display = 'block'; // 始终显示（不再限制仅在书签页可用）
 
-          document.getElementById('twBtnCurrent').addEventListener('click', () => {
-            document.getElementById('twBtnCurrent').innerText = '⏳ 提取中...';
-            chrome.tabs.sendMessage(tabs[0].id, { type: 'START_SYNC_CURRENT' }, (res) => {
-              if (res && res.success) {
-                document.getElementById('twBtnCurrent').innerText = `✅ 保存了 ${res.added} 条`;
-              } else {
-                document.getElementById('twBtnCurrent').innerText = '❌ 提取失败';
-              }
-              setTimeout(() => document.getElementById('twBtnCurrent').innerText = '📥 提取当前屏幕', 3000);
-            });
-          });
+      // 同步进度监听
+      chrome.runtime.onMessage.addListener((msg) => {
+        if (msg.type === 'SYNC_PROGRESS') {
+          this.updateSyncUI(msg);
+        }
+      });
 
-          document.getElementById('twBtnIncrem').addEventListener('click', () => {
-            document.getElementById('twBtnIncrem').innerText = '⏳ 后台提取中...';
-            chrome.tabs.sendMessage(tabs[0].id, { type: 'START_SYNC_INCREMENTAL' });
-            setTimeout(() => document.getElementById('twBtnIncrem').innerText = '🚀 增量滚屏抓取 (追平即停)', 3000);
-          });
-
-          document.getElementById('twBtnDeep').addEventListener('click', () => {
-            document.getElementById('twBtnDeep').innerText = '⏳ 后台提取中...';
-            chrome.tabs.sendMessage(tabs[0].id, { type: 'START_SYNC_DEEP' });
-            setTimeout(() => document.getElementById('twBtnDeep').innerText = '🌋 深度全量滚屏 (强制到底)', 3000);
+      // 打开时查询后台同步状态，恢复 UI
+      chrome.runtime.sendMessage({ type: 'API_SYNC_STATUS' }, (res) => {
+        if (chrome.runtime.lastError || !res) return;
+        if (res.isFetching) {
+          // 同步正在进行中，恢复按钮和状态显示
+          const modeLabel = res.syncMode === 'deep' ? '全量' : '增量';
+          this.setSyncingUI(modeLabel);
+          this.updateSyncUI({
+            status: 'running',
+            count: res.totalFetched,
+            added: res.totalAdded,
+            page: res.currentPage,
+            mode: res.syncMode
           });
         }
+      });
+
+      // 增量同步按钮
+      const twBtnIncrem = document.getElementById('twBtnIncrem');
+      if (twBtnIncrem) {
+        twBtnIncrem.addEventListener('click', () => {
+          this.setSyncingUI('增量');
+          chrome.runtime.sendMessage({ type: 'API_SYNC_INCREMENTAL' }, (res) => {
+            if (chrome.runtime.lastError) {
+              twBtnIncrem.innerText = '❌ 连接失败';
+              twBtnIncrem.disabled = false;
+              this.resetSyncButtons();
+            }
+          });
+        });
       }
-    });
+
+      // 全量同步按钮
+      const twBtnDeep = document.getElementById('twBtnDeep');
+      if (twBtnDeep) {
+        twBtnDeep.addEventListener('click', () => {
+          this.setSyncingUI('全量');
+          chrome.runtime.sendMessage({ type: 'API_SYNC_DEEP' }, (res) => {
+            if (chrome.runtime.lastError) {
+              twBtnDeep.innerText = '❌ 连接失败';
+              twBtnDeep.disabled = false;
+              this.resetSyncButtons();
+            }
+          });
+        });
+      }
+
+      // 停止同步按钮
+      const twBtnStop = document.getElementById('twBtnStop');
+      if (twBtnStop) {
+        twBtnStop.addEventListener('click', () => {
+          chrome.runtime.sendMessage({ type: 'API_SYNC_STOP' });
+          this.resetSyncButtons();
+          const statusEl = document.getElementById('twSyncStatus');
+          if (statusEl) {
+            statusEl.innerText = '🛑 已手动停止';
+            setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+          }
+        });
+      }
+
+      // 保留旧的当前屏幕提取（仍需要内容脚本，仅在书签页可用）
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const twBtnCurrent = document.getElementById('twBtnCurrent');
+        if (tabs[0] && (tabs[0].url.includes('x.com/i/bookmarks') || tabs[0].url.includes('twitter.com/i/bookmarks'))) {
+          if (twBtnCurrent) {
+            twBtnCurrent.style.display = 'inline-block';
+            twBtnCurrent.addEventListener('click', () => {
+              twBtnCurrent.innerText = '⏳ 提取中...';
+              chrome.tabs.sendMessage(tabs[0].id, { type: 'START_SYNC_CURRENT' }, (res) => {
+                if (res && res.success) {
+                  twBtnCurrent.innerText = `✅ 保存了 ${res.added} 条`;
+                } else {
+                  twBtnCurrent.innerText = '❌ 提取失败';
+                }
+                setTimeout(() => twBtnCurrent.innerText = '📥 提取当前屏幕', 3000);
+              });
+            });
+          }
+        } else {
+          // 不在书签页面时隐藏当前屏幕提取按钮
+          if (twBtnCurrent) twBtnCurrent.style.display = 'none';
+        }
+      });
+    }
 
     // 使用轮询机制获取进度，不再监听广播消息
+  }
+
+  resetSyncButtons() {
+    const twBtnIncrem = document.getElementById('twBtnIncrem');
+    const twBtnDeep = document.getElementById('twBtnDeep');
+    const twBtnStop = document.getElementById('twBtnStop');
+    const progressBar = document.getElementById('twSyncProgressBar');
+
+    if (twBtnIncrem) {
+      twBtnIncrem.innerText = '🚀 增量同步 (API)';
+      twBtnIncrem.disabled = false;
+    }
+    if (twBtnDeep) {
+      twBtnDeep.innerText = '🌋 全量同步 (API)';
+      twBtnDeep.disabled = false;
+    }
+    if (twBtnStop) {
+      twBtnStop.style.display = 'none';
+    }
+    if (progressBar) {
+      progressBar.style.display = 'none';
+    }
+  }
+
+  // 设置 UI 为"同步中"状态
+  setSyncingUI(modeLabel) {
+    const twBtnIncrem = document.getElementById('twBtnIncrem');
+    const twBtnDeep = document.getElementById('twBtnDeep');
+    const twBtnStop = document.getElementById('twBtnStop');
+    const statusEl = document.getElementById('twSyncStatus');
+    const progressBar = document.getElementById('twSyncProgressBar');
+
+    if (twBtnIncrem) { twBtnIncrem.innerText = '⏳ 同步中...'; twBtnIncrem.disabled = true; }
+    if (twBtnDeep) { twBtnDeep.innerText = '⏳ 同步中...'; twBtnDeep.disabled = true; }
+    if (twBtnStop) twBtnStop.style.display = 'block';
+    if (statusEl) { statusEl.innerText = `⏳ 正在连接 Twitter API (${modeLabel})...`; statusEl.style.display = 'block'; }
+    if (progressBar) { progressBar.style.display = 'block'; }
+  }
+
+  // 更新同步进度 UI
+  updateSyncUI(msg) {
+    const statusEl = document.getElementById('twSyncStatus');
+    const progressFill = document.getElementById('twSyncProgressFill');
+    const progressBar = document.getElementById('twSyncProgressBar');
+    if (!statusEl) return;
+
+    if (msg.status === 'running') {
+      const addedStr = (msg.added && msg.added > 0) ? `，已入库 ${msg.added} 条` : '';
+      statusEl.innerText = `⏳ 已获取 ${msg.count} 条 · 第 ${msg.page} 页${addedStr}`;
+      statusEl.style.display = 'block';
+      if (progressBar) progressBar.style.display = 'block';
+      // 进度条动画（无法知道总量，用循环动画代替）
+      if (progressFill) {
+        const pct = Math.min(95, (msg.page || 0) * 5); // 每页 5%，最多 95%
+        progressFill.style.width = pct + '%';
+      }
+    } else if (msg.status === 'rate_limited') {
+      statusEl.innerText = `⚠️ API 频率限制中，等待重试... (已获取 ${msg.count} 条)`;
+    } else if (msg.status === 'completed') {
+      statusEl.innerText = `✅ 完成！共 ${msg.count} 条，新增 ${msg.added} 条`;
+      if (progressFill) progressFill.style.width = '100%';
+      setTimeout(() => {
+        statusEl.style.display = 'none';
+        if (progressBar) progressBar.style.display = 'none';
+      }, 5000);
+      this.resetSyncButtons();
+    } else if (msg.status === 'error') {
+      statusEl.innerText = `❌ ${msg.error}`;
+      setTimeout(() => {
+        statusEl.style.display = 'none';
+        if (progressBar) progressBar.style.display = 'none';
+      }, 5000);
+      this.resetSyncButtons();
+    }
   }
 
   async checkInitializationStatus() {
@@ -351,7 +490,7 @@ class BookmarkSearchUI {
 
     // Add banner
     const banner = document.createElement('div');
-    banner.style = "margin-bottom: 15px; font-size: 13px; opacity: 0.9; text-align: center; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px;";
+    banner.style = "margin-bottom: 15px; font-size: 13px; color: var(--secondary-text); text-align: center; background: var(--card-bg); border: 1px solid var(--border-color); padding: 8px; border-radius: 8px;";
     banner.innerText = "自动找到以下书签的最佳归属，点击「移动」确认：";
     this.results.appendChild(banner);
 
@@ -365,11 +504,11 @@ class BookmarkSearchUI {
       div.innerHTML = `
         <div class="bookmark-title">${this.escapeHtml(suggestion.bookmark.title || '无标题')}</div>
         <div class="bookmark-url" style="margin-bottom: 8px;">${this.escapeHtml(suggestion.bookmark.url)}</div>
-        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed rgba(255,255,255,0.2); padding-top: 8px; margin-top: 4px;">
-          <div style="font-size: 11px; color: #ffd700; max-width: 80%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            建议移动至 📁 <b>${this.escapeHtml(suggestion.suggestedFolder)}</b> (${similarityPercent}%)
+        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed var(--border-color); padding-top: 8px; margin-top: 4px;">
+          <div style="font-size: 12px; color: var(--accent-color); max-width: 80%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500;">
+            建议移动至 📁 ${this.escapeHtml(suggestion.suggestedFolder)} (${similarityPercent}%)
           </div>
-          <button class="move-btn" style="background: #4caf50; border: none; color: white; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; transition: all 0.2s;">移动</button>
+          <button class="move-btn" style="background: var(--accent-color); border: none; color: white; border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.2s;">移动</button>
         </div>
       `;
 
@@ -392,8 +531,8 @@ class BookmarkSearchUI {
           if (res.success) {
             moveBtn.innerText = '已移动 ✓';
             moveBtn.style.background = 'transparent';
-            moveBtn.style.border = '1px solid #4caf50';
-            moveBtn.style.color = '#4caf50';
+            moveBtn.style.border = '1px solid var(--accent-color)';
+            moveBtn.style.color = 'var(--accent-color)';
             moveBtn.style.opacity = '1';
 
             setTimeout(() => {
@@ -405,7 +544,7 @@ class BookmarkSearchUI {
           }
         } catch (err) {
           moveBtn.innerText = '失败 ×';
-          moveBtn.style.background = '#f44336';
+          moveBtn.style.background = '#ff3b30'; // Apple red
           moveBtn.style.opacity = '1';
           console.error('移动失败', err);
         }

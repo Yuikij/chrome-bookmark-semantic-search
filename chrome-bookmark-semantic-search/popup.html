@@ -5,14 +5,55 @@
   <meta charset="utf-8">
   <title>智能书签搜索</title>
   <style>
+    :root {
+      --bg-color: #ffffff;
+      --text-color: #1d1d1f;
+      --secondary-text: #86868b;
+      --border-color: rgba(0, 0, 0, 0.08);
+      --hover-bg: rgba(0, 0, 0, 0.04);
+      --input-bg: rgba(0, 0, 0, 0.04);
+      --accent-color: #0071e3;
+      --accent-hover: #0077ed;
+      --card-bg: rgba(0, 0, 0, 0.02);
+      --btn-text: #1d1d1f;
+      --progress-bg: rgba(0, 0, 0, 0.06);
+      --progress-fill: #0071e3;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-color: #202020;
+        --text-color: #f5f5f7;
+        --secondary-text: #98989d;
+        --border-color: rgba(255, 255, 255, 0.1);
+        --hover-bg: rgba(255, 255, 255, 0.08);
+        --input-bg: rgba(255, 255, 255, 0.08);
+        --accent-color: #0a84ff;
+        --accent-hover: #2193ff;
+        --card-bg: rgba(255, 255, 255, 0.04);
+        --btn-text: #f5f5f7;
+        --progress-bg: rgba(255, 255, 255, 0.1);
+        --progress-fill: #0a84ff;
+      }
+    }
+
     body {
       width: 400px;
       min-height: 500px;
-      padding: 20px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg-color);
+      color: var(--text-color);
       margin: 0;
+      transition: background 0.3s, color 0.3s;
+    }
+
+    .container {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      box-sizing: border-box;
     }
 
     .header {
@@ -20,21 +61,37 @@
       margin-bottom: 20px;
     }
 
+    .header h1 {
+      font-size: 20px;
+      font-weight: 600;
+      margin: 0;
+      letter-spacing: -0.02em;
+    }
+
     .search-container {
       position: relative;
-      margin-bottom: 20px;
+      margin-bottom: 16px;
     }
 
     .search-input {
       width: 100%;
       padding: 12px 40px 12px 16px;
-      border: none;
-      border-radius: 25px;
-      font-size: 16px;
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      font-size: 15px;
       outline: none;
-      background: rgba(255, 255, 255, 0.9);
-      color: #333;
+      background: var(--input-bg);
+      color: var(--text-color);
       box-sizing: border-box;
+      transition: all 0.2s ease;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    .search-input:focus {
+      background: var(--bg-color);
+      border-color: var(--accent-color);
+      box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.15);
     }
 
     .search-button {
@@ -42,78 +99,107 @@
       right: 8px;
       top: 50%;
       transform: translateY(-50%);
-      background: #667eea;
+      background: transparent;
       border: none;
-      border-radius: 50%;
       width: 32px;
       height: 32px;
       cursor: pointer;
-      color: white;
+      color: var(--secondary-text);
       display: flex;
       align-items: center;
       justify-content: center;
+      border-radius: 50%;
+      transition: color 0.2s;
+    }
+
+    .search-button:hover {
+      color: var(--accent-color);
+    }
+
+    .search-button span {
+      font-size: 16px;
     }
 
     .status {
       text-align: center;
-      margin: 10px 0;
-      font-size: 14px;
-      opacity: 0.8;
+      margin: 8px 0;
+      font-size: 13px;
+      color: var(--secondary-text);
     }
 
     .results {
-      max-height: 350px;
+      flex: 1;
       overflow-y: auto;
+      margin-top: 8px;
+      padding-right: 4px;
+    }
+
+    .results::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .results::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 3px;
     }
 
     .bookmark-item {
-      background: rgba(255, 255, 255, 0.1);
-      margin: 8px 0;
-      padding: 12px;
-      border-radius: 8px;
+      background: transparent;
+      margin: 4px 0;
+      padding: 12px 14px;
+      border-radius: 12px;
       cursor: pointer;
-      transition: all 0.2s ease;
-      border-left: 4px solid transparent;
+      transition: background 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
     }
 
     .bookmark-item:hover {
-      background: rgba(255, 255, 255, 0.2);
-      border-left-color: #ffd700;
+      background: var(--hover-bg);
     }
 
     .bookmark-title {
-      font-weight: 600;
-      margin-bottom: 4px;
+      font-weight: 500;
       font-size: 14px;
-      line-height: 1.3;
+      line-height: 1.4;
+      color: var(--text-color);
     }
 
     .bookmark-url {
       font-size: 12px;
-      opacity: 0.7;
-      margin-bottom: 4px;
+      color: var(--secondary-text);
       word-break: break-all;
+      display: -webkit-box;
+      -webkit-line-clamp: 1;
+      line-clamp: 1;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
 
     .bookmark-similarity {
       font-size: 11px;
-      opacity: 0.6;
-      text-align: right;
+      color: var(--accent-color);
+      align-self: flex-start;
+      background: rgba(0, 113, 227, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-top: 2px;
     }
 
     .loading {
       text-align: center;
-      padding: 20px;
+      padding: 30px;
     }
 
     .spinner {
       display: inline-block;
-      width: 20px;
-      height: 20px;
-      border: 2px solid rgba(255, 255, 255, 0.3);
+      width: 24px;
+      height: 24px;
+      border: 2px solid var(--border-color);
       border-radius: 50%;
-      border-top-color: white;
-      animation: spin 1s ease-in-out infinite;
+      border-top-color: var(--accent-color);
+      animation: spin 0.8s linear infinite;
     }
 
     @keyframes spin {
@@ -125,86 +211,104 @@
     .no-results {
       text-align: center;
       padding: 40px 20px;
-      opacity: 0.6;
+      color: var(--secondary-text);
+      font-size: 14px;
     }
 
     .init-status {
       text-align: center;
-      padding: 20px;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 8px;
+      padding: 16px;
+      background: var(--card-bg);
+      border-radius: 14px;
       margin: 10px 0;
+      border: 1px solid var(--border-color);
     }
 
     .progress-bar {
       width: 100%;
-      height: 4px;
-      background: rgba(255, 255, 255, 0.2);
-      border-radius: 2px;
-      margin: 10px 0;
+      height: 6px;
+      background: var(--progress-bg);
+      border-radius: 3px;
+      margin: 12px 0 8px;
       overflow: hidden;
     }
 
     .progress-fill {
       height: 100%;
-      background: #ffd700;
+      background: var(--progress-fill);
       transition: width 0.3s ease;
       width: 0%;
+      border-radius: 3px;
     }
   </style>
 </head>
 
 <body>
-  <div class="header">
-    <h1>🔍 智能书签搜索</h1>
-  </div>
-
-  <div class="search-container">
-    <input type="text" class="search-input" id="searchInput" placeholder="试试：关于日语语法学习的书签">
-    <button class="search-button" id="searchButton">
-      <span>🔍</span>
-    </button>
-  </div>
-
-  <div class="actions-container"
-    style="text-align: center; margin-bottom: 10px; display: flex; gap: 8px; justify-content: center;">
-    <button id="autoCategorizeBtn"
-      style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 6px 12px; border-radius: 15px; cursor: pointer; transition: all 0.3s; font-size: 13px;">
-      ✨ 智能整理无分类
-    </button>
-    <button id="openDashboardBtn"
-      style="background: #1d9bf0; border: none; color: white; padding: 6px 12px; border-radius: 15px; cursor: pointer; transition: all 0.3s; font-size: 13px; font-weight: bold;">
-      🌍 控制面板 & 推特同步
-    </button>
-  </div>
-
-  <div id="twitterActionsSection"
-    style="display: none; background: rgba(0,0,0,0.2); border-radius: 10px; padding: 12px; margin-bottom: 15px;">
-    <div style="font-size: 12px; opacity: 0.8; margin-bottom: 8px; text-align: center;">🐦 探测到 X书签页，可提取数据到知识库</div>
-    <div style="display: flex; flex-direction: column; gap: 8px;">
-      <button id="twBtnCurrent"
-        style="background: rgba(29, 155, 240, 0.9); color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s;">📥
-        提取当前屏幕</button>
-      <button id="twBtnIncrem"
-        style="background: rgba(16, 185, 129, 0.9); color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s;">🚀
-        增量滚屏抓取 (追平即停)</button>
-      <button id="twBtnDeep"
-        style="background: rgba(139, 92, 246, 0.9); color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s;">🌋
-        深度全量滚屏 (强制到底)</button>
+  <div class="container">
+    <div class="header">
+      <h1>智能书签搜索</h1>
     </div>
-  </div>
 
-  <div class="status" id="status">准备就绪</div>
-
-  <div class="init-status" id="initStatus" style="display: none;">
-    <div>正在初始化语义搜索模型...</div>
-    <div class="progress-bar">
-      <div class="progress-fill" id="progressFill"></div>
+    <div class="search-container">
+      <input type="text" class="search-input" id="searchInput" placeholder="搜索书签或自然语言描述...">
+      <button class="search-button" id="searchButton">
+        <span>🔍</span>
+      </button>
     </div>
-    <div id="progressText">0%</div>
-  </div>
 
-  <div class="results" id="results"></div>
+    <div class="actions-container" style="display: flex; gap: 8px; justify-content: center; margin-bottom: 12px;">
+      <button id="autoCategorizeBtn"
+        style="background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-color); padding: 8px 14px; border-radius: 16px; cursor: pointer; transition: all 0.2s; font-size: 13px; flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;">
+        <span style="font-size: 14px;">✨</span> 智能整理
+      </button>
+      <button id="openDashboardBtn"
+        style="background: var(--accent-color); border: none; color: white; padding: 8px 14px; border-radius: 16px; cursor: pointer; transition: all 0.2s; font-size: 13px; font-weight: 500; flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;">
+        <span style="font-size: 14px;">🌍</span> 控制面板
+      </button>
+    </div>
+
+    <div id="twitterActionsSection"
+      style="display: none; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 12px; margin-bottom: 16px;">
+      <div
+        style="font-size: 12px; color: var(--secondary-text); margin-bottom: 10px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 4px;">
+        🐦 Twitter/X 书签同步 (GraphQL API)</div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <button id="twBtnCurrent"
+          style="display: none; background: var(--btn-bg, #1d9bf0); color: white; border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; transition: opacity 0.2s;">📥
+          提取当前屏幕 (DOM)</button>
+        <button id="twBtnIncrem"
+          style="background: var(--btn-bg, #10b981); color: white; border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; transition: opacity 0.2s;">🚀
+          增量同步 (API)</button>
+        <button id="twBtnDeep"
+          style="background: var(--btn-bg, #8b5cf6); color: white; border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; transition: opacity 0.2s;">🌋
+          全量同步 (API)</button>
+        <button id="twBtnStop"
+          style="display: none; background: var(--btn-bg, #ef4444); color: white; border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; transition: opacity 0.2s;">🛑
+          停止同步</button>
+      </div>
+      <div id="twSyncStatus"
+        style="display: none; font-size: 12px; color: var(--secondary-text); margin-top: 8px; text-align: center; padding: 6px; background: var(--hover-bg); border-radius: 8px;">
+      </div>
+      <div id="twSyncProgressBar"
+        style="display: none; width: 100%; height: 4px; background: var(--progress-bg); border-radius: 2px; margin-top: 6px; overflow: hidden;">
+        <div id="twSyncProgressFill"
+          style="height: 100%; background: var(--progress-fill); transition: width 0.5s ease; width: 0%; border-radius: 2px;">
+        </div>
+      </div>
+    </div>
+
+    <div class="status" id="status">准备就绪</div>
+
+    <div class="init-status" id="initStatus" style="display: none;">
+      <div>正在初始化语义搜索模型...</div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div id="progressText">0%</div>
+    </div>
+
+    <div class="results" id="results"></div>
+  </div>
 
   <script src="popup.js"></script>
 </body>

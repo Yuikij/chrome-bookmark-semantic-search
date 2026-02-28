@@ -9,7 +9,8 @@
     "storage",
     "activeTab",
     "scripting",
-    "offscreen"
+    "offscreen",
+    "cookies"
   ],
   
   "host_permissions": [

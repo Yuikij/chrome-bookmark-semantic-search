@@ -1,7 +1,29 @@
 // Chrome Extension Background Script - Service Worker
 // 使用 Offscreen Document 运行语义搜索引擎
 
+// 导入 Twitter GraphQL API 抓取模块
+importScripts('twitter_api.js');
+
 console.log('🚀 Background Service Worker 启动（Offscreen Document 模式）');
+
+// Twitter GraphQL API 抓取器实例（替代原有的 DOM 滚动抓取）
+const twitterFetcher = new TwitterBookmarkFetcher();
+
+// --- 统一文案配置 (UI & 文件夹名称常量) ---
+const UI_TEXTS = {
+  TWITTER_ROOT: '🐦 Twitter/X 书签',
+  BOOKMARK_BAR: '书签栏',
+  OTHER_BOOKMARKS: '其他书签',
+  MOBILE_BOOKMARKS: 'Mobile bookmarks',
+  TWITTER_PREFIX: '[X推文]',
+  ATTRACTED_PREFIX: '🤖 汇入: ',
+  TOPIC_PREFIX: '🔸 议题：',
+  MISC_DISCUSSION: '🔸 深度讨论集 (杂项)',
+  SERIES_SUFFIX: ' (系列)',
+  DUPLICATE_SUFFIX: '+',
+  UNCLASSIFIED_MISC: '📌 零星议题 / 杂谈',
+  MEDIA_COLLECTION: '🖼️ 影像 / 链接转发集'
+};
 
 // Offscreen Document 管理
 class OffscreenManager {
@@ -527,7 +549,7 @@ class SemanticSearchEngine {
       const bm = this.bookmarkData.get(bookmarkId);
       if (!bm.folderPath || !bm.folderPath.includes(' > ')) {
         // 排除过于顶层或特殊的文件夹（不把它们当做独立的语义分类）
-        if (['书签栏', '其他书签', 'Mobile bookmarks', ''].includes(bm.folderPath || '') || (bm.folderPath && bm.folderPath.includes('Twitter/X'))) {
+        if ([UI_TEXTS.BOOKMARK_BAR, UI_TEXTS.OTHER_BOOKMARKS, UI_TEXTS.MOBILE_BOOKMARKS, ''].includes(bm.folderPath || '') || (bm.folderPath && bm.folderPath.includes('Twitter/X'))) {
           continue;
         }
       }
@@ -592,7 +614,7 @@ class SemanticSearchEngine {
     for (const [bookmarkId, embedding] of this.embeddings.entries()) {
       const bm = this.bookmarkData.get(bookmarkId);
       // 针对书签栏第一层、无分类（将Twitter隔离出来，不再参与Chrome全局的移动分类推荐）
-      if (!bm.folderPath || bm.folderPath === '书签栏' || bm.folderPath === '其他书签' || bm.folderPath === '') {
+      if (!bm.folderPath || bm.folderPath === UI_TEXTS.BOOKMARK_BAR || bm.folderPath === UI_TEXTS.OTHER_BOOKMARKS || bm.folderPath === '') {
         let bestMatch = null;
         let highestScore = -1;
 
@@ -625,7 +647,7 @@ class SemanticSearchEngine {
     await this.ensureInitialized();
 
     const all = await this.getAllBookmarks();
-    const xBookmarks = all.filter(bm => bm.title && bm.title.includes('[X推文]'));
+    const xBookmarks = all.filter(bm => bm.title && bm.title.includes(UI_TEXTS.TWITTER_PREFIX));
 
     if (xBookmarks.length === 0) return { userFolders: {}, autoClusters: {} };
 
@@ -641,7 +663,7 @@ class SemanticSearchEngine {
       }
 
       const parts = bm.folderPath.split(' > ');
-      const txIndex = parts.indexOf('🐦 Twitter/X 书签');
+      const txIndex = parts.indexOf(UI_TEXTS.TWITTER_ROOT);
 
       if (txIndex === -1 && parts.length > 0) {
         // 放到了主库的别的普通文件夹里
@@ -664,22 +686,38 @@ class SemanticSearchEngine {
     const mediaBookmarks = [];
     const validData = [];
 
+    // --- 辅助函数：从推文标题中解析元数据 ---
+    const parseBookmarkMeta = (bm) => {
+      let rawTitle = bm.title || '';
+      let metadata = {};
+      const metaMatch = rawTitle.match(/\u200B(.*?)\u200B/);
+      if (metaMatch) {
+        try { metadata = JSON.parse(metaMatch[1]); } catch (e) { /* ignore */ }
+      }
+      let text = rawTitle.replace(/\u200B.*?\u200B/g, '').trim();
+      let author = '';
+      const titleMatch = text.match(/\[X推文\]\s*(.*?):\s*(.*)/);
+      if (titleMatch) {
+        author = titleMatch[1].trim();
+        text = titleMatch[2].trim();
+      }
+      return { author, text, metadata };
+    };
+
     // 1. 过滤和分离纯多媒体推文，并排除已经在某个分类里的
     for (const bm of xBookmarks) {
       if (pinnedIds.has(bm.id)) continue;
 
-      let text = bm.title.replace(/\u200B.*?\u200B/g, '').trim(); // 去除元数据
-      const match = text.match(/\[X推文\]\s*(.*?):\s*(.*)/);
-      if (match) text = match[2].trim();
+      const parsed = parseBookmarkMeta(bm);
 
-      if (text === '图片/视频推文' || text === '图片/视频推文...' || text === '图片/视频推文 ...' || text.length < 5) {
+      if (parsed.text === '图片/视频推文' || parsed.text.startsWith('图片/视频推文') || parsed.text.length < 5) {
         mediaBookmarks.push(bm);
         continue;
       }
 
       const emb = this.embeddings.get(bm.id);
       if (emb) {
-        validData.push({ bm, text, vector: emb });
+        validData.push({ bm, text: parsed.text, author: parsed.author, metadata: parsed.metadata, vector: emb });
       } else {
         mediaBookmarks.push(bm);
       }
@@ -745,7 +783,7 @@ class SemanticSearchEngine {
           if (sim > bestSim) { bestSim = sim; bestFolder = fv; }
         }
         if (bestFolder && bestSim >= bestFolder.threshold) {
-          const targetName = `🤖 汇入: ${bestFolder.name}`;
+          const targetName = `${UI_TEXTS.ATTRACTED_PREFIX}${bestFolder.name}`;
           if (!autoClusters[targetName]) autoClusters[targetName] = [];
           autoClusters[targetName].push(item.bm);
           validData.splice(i, 1);
@@ -753,110 +791,274 @@ class SemanticSearchEngine {
         }
       }
       console.log(`🧲 [FolderAttract] 本轮共吸引 ${attractCount} 条推文`);
-      // 不再存入 IndexedDB
     }
 
-    // 2. Average Linkage Density Clustering
-    const SIMILARITY_THRESHOLD = 0.78; // 提高阈值，之前 0.65 太低导致几乎所有推文被聚类成一个大文件夹
-    const clusters = [];
+    // --- 2. 元数据增强的两阶段聚类 ---
 
-    for (let item of validData) {
-      let bestScore = -1;
-      let bestClusterIdx = -1;
+    // 计算增强相似度：向量相似度 + 作者亲和度加成
+    const enhancedSimilarity = (item1, item2) => {
+      let baseSim = this.cosineSimilarity(item1.vector, item2.vector);
+      // 同作者推文获得相似度加成（内容相关性更可能高）
+      if (item1.author && item2.author && item1.author === item2.author) {
+        baseSim = Math.min(1.0, baseSim + 0.08);
+      }
+      return baseSim;
+    };
 
-      for (let i = 0; i < clusters.length; i++) {
-        let totalScore = 0;
-        for (let existItem of clusters[i].items) {
-          totalScore += this.cosineSimilarity(item.vector, existItem.vector);
+    // Average Linkage 聚类（单次）
+    const runClustering = (data, threshold) => {
+      const clusters = [];
+      for (const item of data) {
+        let bestScore = -1;
+        let bestIdx = -1;
+        for (let i = 0; i < clusters.length; i++) {
+          let totalScore = 0;
+          for (const existItem of clusters[i]) {
+            totalScore += enhancedSimilarity(item, existItem);
+          }
+          const avgScore = totalScore / clusters[i].length;
+          if (avgScore > bestScore) {
+            bestScore = avgScore;
+            bestIdx = i;
+          }
         }
-        let avgScore = totalScore / clusters[i].items.length;
-        if (avgScore > bestScore) {
-          bestScore = avgScore;
-          bestClusterIdx = i;
+        if (bestScore >= threshold) {
+          clusters[bestIdx].push(item);
+        } else {
+          clusters.push([item]);
         }
       }
+      return clusters;
+    };
 
-      if (bestScore >= SIMILARITY_THRESHOLD) {
-        clusters[bestClusterIdx].items.push(item);
+    // 第一阶段：较紧的阈值，形成高质量核心簇
+    const TIGHT_THRESHOLD = 0.72;
+    const pass1Clusters = runClustering(validData, TIGHT_THRESHOLD);
+
+    // 分离：多项簇（已成型）与单项簇（待二次聚类）
+    const formedClusters = [];
+    const singletons = [];
+    for (const cluster of pass1Clusters) {
+      if (cluster.length >= 2) {
+        formedClusters.push(cluster);
       } else {
-        clusters.push({ items: [item] });
+        singletons.push(cluster[0]);
       }
     }
 
-    // 3. 提取关键词命名
-    const stopWords = new Set(['的', '了', '和', '是', '在', '我', '有', '就', '也', '都', '不', '被', '与', '为', '要', '这', 'https', 'com', 'twitter', 'status', 'photo', 'video', '分享', '可以', '这个', '我们', '一个', '没有', '什么', '对于', '如果', '或者', '一下', '非常', '很多', '就是', '大家', '已经', '知道', '自己', '觉得', '因为', '然后', '但是', '还是', '怎么', '那么', '这种', '比较', '而且', '其实', '只有', '不过', '所以', '可能', '现在', '那些', '有些', '看到', '时候', '只是', '一样', '出来', '开始', '认为', '我的', '你的', '他的', '他们', '那个', '这些', '那些', '特别', '并且', '甚至', '如何', '真的', '不会', '可以', '需要', '问题', '推文', 'x推文', '不知不觉中', '这篇已经将近', '建议务必收藏和阅读']);
+    // 第二阶段：对单项用更松的阈值再聚类
+    const LOOSE_THRESHOLD = 0.58;
+    let finalSingletons = [];
+    if (singletons.length > 1) {
+      const pass2Clusters = runClustering(singletons, LOOSE_THRESHOLD);
+      for (const cluster of pass2Clusters) {
+        if (cluster.length >= 2) {
+          formedClusters.push(cluster);
+        } else {
+          finalSingletons.push(cluster[0]);
+        }
+      }
+    } else {
+      finalSingletons = singletons;
+    }
+
+    // 第三阶段：尝试将剩余单项就近合并到已有簇
+    const MERGE_THRESHOLD = 0.52;
+    const stillAlone = [];
+    for (const item of finalSingletons) {
+      let bestClusterIdx = -1;
+      let bestSim = -1;
+      for (let i = 0; i < formedClusters.length; i++) {
+        // 只比较质心，加速
+        const dim = item.vector.length;
+        const centroid = new Array(dim).fill(0);
+        for (const ci of formedClusters[i]) {
+          for (let d = 0; d < dim; d++) centroid[d] += ci.vector[d];
+        }
+        for (let d = 0; d < dim; d++) centroid[d] /= formedClusters[i].length;
+        const sim = enhancedSimilarity(item, { vector: centroid, author: '' });
+        if (sim > bestSim) { bestSim = sim; bestClusterIdx = i; }
+      }
+      if (bestClusterIdx >= 0 && bestSim >= MERGE_THRESHOLD) {
+        formedClusters[bestClusterIdx].push(item);
+      } else {
+        stillAlone.push(item);
+      }
+    }
+
+    console.log(`📊 [Clustering] 阶段汇总: ${formedClusters.length} 个簇, ${stillAlone.length} 条未归类`);
+
+    // --- 3. 基于 TF-IDF 的自动关键词提取与智能命名 ---
+    // 不再使用硬编码的停用词表，而是通过词在簇间的分布自动判断区分度
+
+    // 分词函数：使用 Chrome 原生 Intl.Segmenter API 进行语言学分词
+    // 中文会被正确切分为词语（如 "机器学习算法" → "机器学习" + "算法"）
+    const zhSegmenter = new Intl.Segmenter('zh-CN', { granularity: 'word' });
+
+    const tokenize = (text) => {
+      const segments = zhSegmenter.segment(text);
+      const tokens = [];
+      for (const { segment, isWordLike } of segments) {
+        if (!isWordLike) continue; // 跳过标点、空格等非词汇
+        const t = segment.toLowerCase();
+        // 结构化过滤：跳过单字、纯数字、URL 碎片
+        const isCJK = /[\u4e00-\u9fa5]/.test(t);
+        if (isCJK && t.length < 2) continue;   // 中文单字无意义
+        if (!isCJK && t.length < 3) continue;   // 英文/数字太短也跳过
+        if (/^\d+$/.test(t)) continue;           // 纯数字
+        tokens.push(t);
+      }
+      return tokens;
+    };
+
+    // 构建全局 IDF（逆簇频率）：统计每个词出现在多少个簇中
+    const allClustersForIdf = [...formedClusters];
+    // 把待命名的全部簇当作"文档集"
+    const totalDocs = allClustersForIdf.length;
+    const docFrequency = {}; // word → 出现在多少个簇中
+
+    allClustersForIdf.forEach(cluster => {
+      const clusterWords = new Set();
+      cluster.forEach(item => {
+        tokenize(item.text).forEach(t => clusterWords.add(t));
+      });
+      for (const w of clusterWords) {
+        docFrequency[w] = (docFrequency[w] || 0) + 1;
+      }
+    });
+
+    // IDF 计算：log(总簇数 / 出现该词的簇数)
+    // 出现在所有簇中的词 → IDF ≈ 0 → 自动被抑制（等同于停用词）
+    const idf = (word) => {
+      const df = docFrequency[word] || 0;
+      if (df === 0) return 0;
+      return Math.log((totalDocs + 1) / (df + 1)) + 1; // 平滑处理
+    };
 
     const extractName = (items) => {
-      // 如果仅有一个项目，不该走到这里，但为了稳妥起见
-      if (items.length === 1) return '🔸 议题：' + items[0].text.substring(0, 10) + '...';
+      if (items.length === 1) {
+        const it = items[0];
+        const preview = it.text.substring(0, 15).replace(/\.+$/, '');
+        return it.author ? `${it.author}: ${preview}…` : `${preview}…`;
+      }
 
-      // 1. 计算该聚类的中心点 (Centroid)
+      // (a) 统计作者分布
+      const authorCounts = {};
+      items.forEach(it => {
+        if (it.author) authorCounts[it.author] = (authorCounts[it.author] || 0) + 1;
+      });
+      const sortedAuthors = Object.entries(authorCounts).sort((a, b) => b[1] - a[1]);
+      const topAuthor = sortedAuthors.length > 0 ? sortedAuthors[0] : null;
+      const authorDominance = topAuthor ? topAuthor[1] / items.length : 0;
+
+      // (b) 找到最接近质心的代表性推文
       const dim = items[0].vector.length;
       let centroid = new Array(dim).fill(0);
       for (const item of items) {
-        for (let j = 0; j < dim; j++) {
-          centroid[j] += item.vector[j];
-        }
+        for (let j = 0; j < dim; j++) centroid[j] += item.vector[j];
       }
-      for (let j = 0; j < dim; j++) {
-        centroid[j] /= items.length;
-      }
+      for (let j = 0; j < dim; j++) centroid[j] /= items.length;
 
-      // 2. 找到最接近中心点的那条推文 (Medoid / 代表性推文)
-      let bestItem = null;
+      let bestItem = items[0];
       let maxSim = -Infinity;
       for (const item of items) {
         const sim = this.cosineSimilarity(item.vector, centroid);
-        if (sim > maxSim) {
-          maxSim = sim;
-          bestItem = item;
-        }
+        if (sim > maxSim) { maxSim = sim; bestItem = item; }
       }
 
-      // 3. 提取提取式摘要（代表性句子的核心成分）作为标题
-      const bestText = bestItem ? bestItem.text : items[0].text;
-
-      // 使用词频统计来辅助从最强的那条推文里掏词
-      let wordFreq = {};
+      // (c) TF-IDF 自动关键词提取
+      // TF: 词在当前簇中出现的频次
+      const wordFreq = {};
       items.forEach(item => {
-        const tokens = item.text.match(/[\u4e00-\u9fa5]{2,}|[a-zA-Z0-9_\-]{4,}/g) || [];
-        tokens.forEach(t => {
-          t = t.toLowerCase();
-          if (!stopWords.has(t)) { wordFreq[t] = (wordFreq[t] || 0) + 1; }
+        tokenize(item.text).forEach(t => {
+          wordFreq[t] = (wordFreq[t] || 0) + 1;
         });
       });
 
-      const bestTokens = bestText.match(/[\u4e00-\u9fa5]{2,}|[a-zA-Z0-9_\-]{4,}/g) || [];
-      const validTokens = bestTokens.filter(t => !stopWords.has(t.toLowerCase()));
+      // 计算 TF-IDF 得分，取得分最高的关键词
+      const tfidfScores = Object.entries(wordFreq).map(([word, tf]) => ({
+        word,
+        score: tf * idf(word)
+      }));
+      tfidfScores.sort((a, b) => b.score - a.score);
 
-      // 按照全局词频对代表性推文中的词语进行排序
-      validTokens.sort((a, b) => (wordFreq[b.toLowerCase()] || 0) - (wordFreq[a.toLowerCase()] || 0));
+      // 从代表性推文中取 token，按 TF-IDF 得分排序
+      const bestTokens = tokenize(bestItem.text);
+      const uniqueBest = [...new Set(bestTokens)];
+      uniqueBest.sort((a, b) => {
+        const sa = tfidfScores.find(s => s.word === a)?.score || 0;
+        const sb = tfidfScores.find(s => s.word === b)?.score || 0;
+        return sb - sa;
+      });
 
-      // 取前两个最核心且在这条最具代表性推文中存在的词语拼接
-      let topWords = [...new Set(validTokens)].slice(0, 2);
+      // 取前 3 个高区分度的关键词
+      // 如果代表性推文的 token 不够好，从全簇 TF-IDF 排名补充
+      let topWords = uniqueBest.slice(0, 3);
+      if (topWords.length < 3) {
+        const existing = new Set(topWords);
+        for (const entry of tfidfScores) {
+          if (!existing.has(entry.word)) {
+            topWords.push(entry.word);
+            existing.add(entry.word);
+            if (topWords.length >= 3) break;
+          }
+        }
+      }
+      const topicStr = topWords.join(' · ');
 
-      return topWords.length > 0 ? '🔸 议题：' + topWords.join(' · ') : '🔸 深度讨论集 (杂项)';
+      // (d) 基于元数据组合命名
+      if (authorDominance >= 0.6 && topAuthor) {
+        // 作者主导型簇
+        return topicStr ? `${topAuthor[0]}: ${topicStr}` : `${topAuthor[0]} 的内容`;
+      }
+      if (topicStr) {
+        // 话题主导型簇
+        return topicStr;
+      }
+      // 兜底：用代表性推文的摘要
+      const preview = bestItem.text.substring(0, 20).replace(/\.+$/, '');
+      return `${preview}…`;
     };
 
     // 4. 组装自动聚类结果
-    const unclassified = [];
-    clusters.sort((a, b) => b.items.length - a.items.length);
+    formedClusters.sort((a, b) => b.length - a.length);
 
-    for (let cluster of clusters) {
-      if (cluster.items.length === 1) {
-        unclassified.push(cluster.items[0].bm);
-      } else {
-        const name = extractName(cluster.items);
-        let outputName = autoClusters[name] ? `${name} (系列)` : name;
-        while (autoClusters[outputName]) outputName += `+`;
-        autoClusters[outputName] = cluster.items.map(i => i.bm);
+    for (const cluster of formedClusters) {
+      const name = extractName(cluster);
+      let outputName = name;
+      let suffix = 2;
+      while (autoClusters[outputName]) { outputName = `${name} (${suffix++})`; }
+      autoClusters[outputName] = cluster.map(i => i.bm);
+    }
+
+    // 剩余未归类的：按作者归堆，而不是全部扔进一个大杂烩
+    if (stillAlone.length > 0) {
+      const byAuthor = {};
+      const noAuthor = [];
+      for (const item of stillAlone) {
+        if (item.author) {
+          if (!byAuthor[item.author]) byAuthor[item.author] = [];
+          byAuthor[item.author].push(item);
+        } else {
+          noAuthor.push(item);
+        }
+      }
+      // 同作者 >= 2 条的单独建簇
+      for (const [author, items] of Object.entries(byAuthor)) {
+        if (items.length >= 2) {
+          const folderName = `${author} 的其他收藏`;
+          autoClusters[folderName] = items.map(i => i.bm);
+        } else {
+          noAuthor.push(...items);
+        }
+      }
+      // 真正的零散项
+      if (noAuthor.length > 0) {
+        autoClusters[UI_TEXTS.UNCLASSIFIED_MISC] = noAuthor.map(i => i.bm);
       }
     }
-    if (unclassified.length > 0) {
-      autoClusters['📌 零星议题 / 杂谈'] = unclassified;
-    }
     if (mediaBookmarks.length > 0) {
-      autoClusters['🖼️ 影像 / 链接转发集'] = mediaBookmarks;
+      autoClusters[UI_TEXTS.MEDIA_COLLECTION] = mediaBookmarks;
     }
 
     // 5. 构建用户文件夹的完整信息（把 ID 还原为 bm 对象）
@@ -1022,7 +1224,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         let twitterFolder = null;
         const traverseAndFind = (nodes) => {
           for (let node of nodes) {
-            if (node.title === '🐦 Twitter/X 书签' && !node.url && !twitterFolder) {
+            if (node.title === UI_TEXTS.TWITTER_ROOT && !node.url && !twitterFolder) {
               twitterFolder = node;
             }
             if (node.children) traverseAndFind(node.children);
@@ -1106,7 +1308,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         let twitterFolder = null;
         const traverseAndFind = (nodes) => {
           for (let node of nodes) {
-            if (node.title === '🐦 Twitter/X 书签' && !node.url && !twitterFolder) {
+            if (node.title === UI_TEXTS.TWITTER_ROOT && !node.url && !twitterFolder) {
               twitterFolder = node;
             }
             if (node.children) traverseAndFind(node.children);
@@ -1155,7 +1357,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         let twitterFolder = null;
         const traverseAndFind = (nodes) => {
           for (let node of nodes) {
-            if (node.title === '🐦 Twitter/X 书签' && !node.url && !twitterFolder) {
+            if (node.title === UI_TEXTS.TWITTER_ROOT && !node.url && !twitterFolder) {
               twitterFolder = node;
             }
             if (node.children) traverseAndFind(node.children);
@@ -1302,6 +1504,191 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     })();
     return true;
+  }
+
+  // ====== GraphQL API 驱动的推特书签同步 ======
+
+  // 辅助函数：将抓取的推文保存到 Chrome 书签
+  async function saveBookmarksToChrome(tweets) {
+    if (tweets.length === 0) return 0;
+
+    let folders = await new Promise(resolve => chrome.bookmarks.getTree(resolve));
+    let root = folders[0];
+
+    // 全局去重
+    const allUrls = new Set();
+    let twitterFolder = null;
+
+    const traverseAndFind = (nodes) => {
+      for (let node of nodes) {
+        if (node.url) allUrls.add(node.url);
+        if (node.title === '🐦 Twitter/X 书签' && !node.url && !twitterFolder) {
+          twitterFolder = node;
+        }
+        if (node.children) {
+          traverseAndFind(node.children);
+        }
+      }
+    };
+    traverseAndFind(root.children);
+
+    let otherBookmarks = root.children.find(c => c.id === '2' || c.title === '其他书签' || c.title === 'Other bookmarks') || root.children[root.children.length - 1];
+
+    if (!twitterFolder) {
+      twitterFolder = await new Promise(resolve => {
+        chrome.bookmarks.create({
+          parentId: otherBookmarks.id,
+          title: '🐦 Twitter/X 书签'
+        }, resolve);
+      });
+    }
+
+    let addedCount = 0;
+    for (let item of tweets) {
+      if (!allUrls.has(item.url)) {
+        await new Promise(resolve => {
+          chrome.bookmarks.create({
+            parentId: twitterFolder.id,
+            title: item.title,
+            url: item.url
+          }, resolve);
+        });
+        allUrls.add(item.url);
+        addedCount++;
+      }
+    }
+
+    return addedCount;
+  }
+
+  // API 全量同步（Deep 模式）
+  if (messageType === 'API_SYNC_DEEP') {
+    (async () => {
+      try {
+        console.log('🚀 [API Sync] 开始全量同步...');
+
+        const result = await twitterFetcher.fetchAllBookmarks(
+          // onProgress
+          (count, page, status, added) => {
+            chrome.runtime.sendMessage({
+              type: 'SYNC_PROGRESS',
+              status: status === 'rate_limited' ? 'rate_limited' : 'running',
+              count: count,
+              added: added || 0,
+              page: page,
+              mode: 'deep'
+            }).catch(() => { });
+          },
+          // onSaveBatch: 每几页保存一批到 Chrome 书签
+          (batch) => saveBookmarksToChrome(batch)
+        );
+
+        console.log(`✅ [API Sync] 全量同步完成: 共获取 ${result.total} 条，新增 ${result.added} 条`);
+
+        chrome.runtime.sendMessage({
+          type: 'SYNC_PROGRESS',
+          status: 'completed',
+          count: result.total,
+          added: result.added,
+          mode: 'deep'
+        }).catch(() => { });
+
+        sendResponse({ success: true, total: result.total, added: result.added });
+      } catch (err) {
+        console.error('❌ [API Sync] 全量同步失败:', err);
+
+        chrome.runtime.sendMessage({
+          type: 'SYNC_PROGRESS',
+          status: 'error',
+          error: err.message,
+          mode: 'deep'
+        }).catch(() => { });
+
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  // API 增量同步
+  if (messageType === 'API_SYNC_INCREMENTAL') {
+    (async () => {
+      try {
+        console.log('🚀 [API Sync] 开始增量同步...');
+
+        // 获取所有已有的书签 URL
+        let folders = await new Promise(resolve => chrome.bookmarks.getTree(resolve));
+        const existingUrls = new Set();
+        const collectUrls = (nodes) => {
+          for (let node of nodes) {
+            if (node.url) existingUrls.add(node.url);
+            if (node.children) collectUrls(node.children);
+          }
+        };
+        collectUrls(folders);
+
+        const result = await twitterFetcher.fetchIncrementalBookmarks(
+          existingUrls,
+          // onProgress
+          (count, page, status, added) => {
+            chrome.runtime.sendMessage({
+              type: 'SYNC_PROGRESS',
+              status: status === 'rate_limited' ? 'rate_limited' : 'running',
+              count: count,
+              added: added || 0,
+              page: page,
+              mode: 'incremental'
+            }).catch(() => { });
+          },
+          // onSaveBatch
+          (batch) => saveBookmarksToChrome(batch)
+        );
+
+        console.log(`✅ [API Sync] 增量同步完成: 发现 ${result.total} 条新推文，新增 ${result.added} 条`);
+
+        chrome.runtime.sendMessage({
+          type: 'SYNC_PROGRESS',
+          status: 'completed',
+          count: result.total,
+          added: result.added,
+          mode: 'incremental'
+        }).catch(() => { });
+
+        sendResponse({ success: true, total: result.total, added: result.added });
+      } catch (err) {
+        console.error('❌ [API Sync] 增量同步失败:', err);
+
+        chrome.runtime.sendMessage({
+          type: 'SYNC_PROGRESS',
+          status: 'error',
+          error: err.message,
+          mode: 'incremental'
+        }).catch(() => { });
+
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  // 停止同步
+  if (messageType === 'API_SYNC_STOP') {
+    twitterFetcher.stop();
+    sendResponse({ success: true });
+    return false;
+  }
+
+  // 查询同步状态（供 popup 重开后恢复 UI）
+  if (messageType === 'API_SYNC_STATUS') {
+    sendResponse({
+      success: true,
+      isFetching: twitterFetcher.isFetching,
+      syncMode: twitterFetcher.syncMode || null,
+      currentPage: twitterFetcher.currentPage || 0,
+      totalFetched: twitterFetcher.totalFetched || 0,
+      totalAdded: twitterFetcher.totalAdded || 0
+    });
+    return false;
   }
 
   // 获取仪表盘数据

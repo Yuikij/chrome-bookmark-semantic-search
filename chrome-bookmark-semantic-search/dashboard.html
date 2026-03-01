@@ -338,6 +338,87 @@
             background: var(--bg-surface);
         }
 
+        /* Bookmark Web Viewer Drawer - wider panel for iframe embedding */
+        #bmDrawerPanel {
+            max-width: 75vw;
+            right: -80vw;
+        }
+
+        #bmDrawerPanel.open {
+            right: 0;
+        }
+
+        .bm-viewer-toolbar {
+            padding: 10px 18px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-surface-hover);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .bm-viewer-toolbar .bm-viewer-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .bm-viewer-toolbar .bm-viewer-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-main);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .bm-viewer-toolbar .bm-viewer-url {
+            font-size: 11px;
+            color: var(--text-sec);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 2px;
+            font-family: monospace;
+        }
+
+        .bm-viewer-toolbar .bm-viewer-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .bm-viewer-iframe-wrap {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            background: #fff;
+        }
+
+        .bm-viewer-iframe-wrap iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        .bm-viewer-iframe-wrap .bm-iframe-loading {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-surface);
+            z-index: 2;
+            transition: opacity 0.3s;
+        }
+
+        .bm-viewer-iframe-wrap .bm-iframe-loading.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
         .tw-list-item {
             padding: 12px 20px;
             border-bottom: 1px solid var(--border-color);
@@ -795,11 +876,14 @@
             style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 0;">
             <div class="tabs">
                 <button class="tab-btn active" data-target="tab-folders"
-                    style="border-bottom-left-radius:0; border-bottom-right-radius:0; padding-bottom:12px;">📁
-                    语义折叠树</button>
+                    style="border-bottom-left-radius:0; border-bottom-right-radius:0; padding-bottom:12px;">📂
+                    原生书签结构</button>
                 <button class="tab-btn" data-target="tab-twitter"
                     style="border-bottom-left-radius:0; border-bottom-right-radius:0; padding-bottom:12px;">🐦 推特/X
                     知识库</button>
+                <button class="tab-btn" data-target="tab-trash"
+                    style="border-bottom-left-radius:0; border-bottom-right-radius:0; padding-bottom:12px;">🗑️
+                    回收站 <span id="trashCount" style="font-size:11px; color:var(--text-muted);"></span></button>
                 <button class="tab-btn" data-target="tab-search" id="tabSearchBtn"
                     style="display: none; border-bottom-left-radius:0; border-bottom-right-radius:0; padding-bottom:12px;">🔍
                     搜索结果</button>
@@ -814,7 +898,22 @@
         </div>
 
         <div id="tab-folders" class="view-section active">
-            <div class="index-view" id="indexView"></div>
+            <div class="tw-list-layout" id="folderViewSplit" style="display: flex; flex-direction: row;">
+                <div
+                    style="width: 320px; border-right: 1px solid var(--border-color); flex-shrink: 0; display: flex; flex-direction: column;">
+                    <div class="tw-list-pane" id="indexView" style="overflow-y: auto; flex: 1;">
+                        <!-- Folders inserted here -->
+                    </div>
+                </div>
+                <div id="folderContentPane"
+                    style="flex: 1; overflow-y: auto; background: var(--bg-surface); position: relative;">
+                    <div id="folderContentEmpty"
+                        style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-sec);">
+                        <div style="font-size: 40px; margin-bottom: 16px;">👈</div>
+                        <div>请在左侧选择一个分类以查看书签</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div id="tab-twitter" class="view-section">
@@ -823,12 +922,32 @@
             </div>
 
             <!-- Wide List View layout -->
-            <div class="tw-list-layout" id="xViewSplit">
-                <div class="tw-list-pane" id="xListPane">
-                    <div style="padding: 60px; text-align: center; color: var(--text-sec);">
-                        <div style="font-size: 30px; margin-bottom: 15px;">📊</div>
-                        <div id="rawCountLabel">加载中...</div>
-                        <div style="margin-top: 10px; font-size: 13px;">点击上方 <b>🔮 聚类按钮</b> 开始智能分类</div>
+            <div class="tw-list-layout" id="xViewSplit" style="display: flex; flex-direction: row;">
+                <div
+                    style="width: 320px; border-right: 1px solid var(--border-color); flex-shrink: 0; display: flex; flex-direction: column;">
+                    <!-- Contextual Toolbar -->
+                    <div id="xFolderToolbar"
+                        style="display: none; padding: 10px 12px; border-bottom: 1px solid var(--border-color); background: var(--bg-surface-hover); flex-shrink: 0;">
+                        <div id="xToolbarFolderName"
+                            style="font-size: 13px; font-weight: 600; color: var(--text-main); margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        </div>
+                        <div id="xToolbarActions" style="display: flex; gap: 6px; flex-wrap: wrap;"></div>
+                    </div>
+                    <!-- Folder List -->
+                    <div class="tw-list-pane" id="xListPane" style="overflow-y: auto; flex: 1;">
+                        <div style="padding: 60px; text-align: center; color: var(--text-sec);">
+                            <div style="font-size: 30px; margin-bottom: 15px;">📊</div>
+                            <div id="rawCountLabel">加载中...</div>
+                            <div style="margin-top: 10px; font-size: 13px;">点击上方 <b>🔮 聚类按钮</b> 开始智能分类</div>
+                        </div>
+                    </div>
+                </div>
+                <div id="xContentPane"
+                    style="flex: 1; overflow-y: auto; background: var(--bg-surface); position: relative;">
+                    <div id="xContentEmpty"
+                        style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-sec);">
+                        <div style="font-size: 40px; margin-bottom: 16px;">👈</div>
+                        <div>请在左侧选择一个分类以查看书签</div>
                     </div>
                 </div>
             </div>
@@ -846,10 +965,50 @@
             </div>
         </div>
 
+        <div id="tab-trash" class="view-section">
+            <div class="index-view" id="trashView" style="flex: 1; min-height: 0; overflow-y: auto;">
+                <div id="trashToolbar"
+                    style="padding: 14px 20px; background: var(--bg-surface-hover); border-bottom: 1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; position: sticky; top: 0; z-index: 10;">
+                    <span style="font-size:14px; color:var(--text-sec);">已删除的书签会被保留在这里，可随时恢复或彻底清除。</span>
+                    <button class="btn btn-danger btn-empty-trash"
+                        style="padding: 6px 12px; font-size:13px; display:none;">💥 一键清空回收站</button>
+                </div>
+                <div id="trashListContent" style="padding: 0;"></div>
+            </div>
+        </div>
+
         <div id="tab-search" class="view-section">
             <div id="searchStatus" class="status-banner status-info" style="display: none;"></div>
             <div class="index-view" id="searchView"
                 style="padding: 20px; display: flex; flex-direction: column; gap: 10px;"></div>
+        </div>
+
+        <!-- Drawer for Native Bookmark Web Viewer -->
+        <div id="bmDrawerOverlay" class="drawer-overlay"></div>
+        <div id="bmDrawerPanel" class="drawer-panel">
+            <div class="drawer-header">
+                <h3 class="drawer-title" id="bmDrawerTitle">书签预览</h3>
+                <button id="bmDrawerClose" class="drawer-close">&times;</button>
+            </div>
+            <div class="bm-viewer-toolbar" id="bmViewerToolbar">
+                <div class="bm-viewer-info">
+                    <div class="bm-viewer-title" id="bmViewerTitle"></div>
+                    <div class="bm-viewer-url" id="bmViewerUrl"></div>
+                </div>
+                <div class="bm-viewer-actions">
+                    <a id="bmViewerOpenTab" href="#" target="_blank" class="btn btn-primary"
+                        style="padding: 5px 12px; font-size: 12px; text-decoration: none;">🌐 新标签页打开</a>
+                    <button id="bmViewerTrash" class="btn btn-danger" style="padding: 5px 12px; font-size: 12px;">🗑️
+                        移入回收站</button>
+                </div>
+            </div>
+            <div class="bm-viewer-iframe-wrap" id="bmIframeWrap">
+                <div class="bm-iframe-loading" id="bmIframeLoading">
+                    <div style="font-size: 36px; margin-bottom: 12px; animation: pulse 1.5s infinite;">🌐</div>
+                    <div style="color: var(--text-sec); font-size: 14px;">正在加载网页...</div>
+                </div>
+                <!-- iframe injected dynamically -->
+            </div>
         </div>
 
         <div id="cDialogOverlay" class="glass-overlay">

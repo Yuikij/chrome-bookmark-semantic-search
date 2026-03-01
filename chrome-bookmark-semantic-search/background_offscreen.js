@@ -12,6 +12,7 @@ const twitterFetcher = new TwitterBookmarkFetcher();
 // --- 统一文案配置 (UI & 文件夹名称常量) ---
 const UI_TEXTS = {
   TWITTER_ROOT: '🐦 Twitter/X 书签',
+  TRASH_FOLDER: '🗑️ 回收站',
   BOOKMARK_BAR: '书签栏',
   OTHER_BOOKMARKS: '其他书签',
   MOBILE_BOOKMARKS: 'Mobile bookmarks',
@@ -24,6 +25,56 @@ const UI_TEXTS = {
   UNCLASSIFIED_MISC: '📌 零星议题 / 杂谈',
   MEDIA_COLLECTION: '🖼️ 影像 / 链接转发集'
 };
+
+// --- 回收站辅助函数 (hoisted，供所有 handler 调用) ---
+async function getTrashFolder() {
+  let foldersTree = await new Promise(resolve => chrome.bookmarks.getTree(resolve));
+  let root = foldersTree[0];
+  let trashFolder = null;
+  const traverseAndFind = (nodes) => {
+    for (let node of nodes) {
+      if (node.title === UI_TEXTS.TRASH_FOLDER && !node.url && !trashFolder) {
+        trashFolder = node;
+      }
+      if (node.children) traverseAndFind(node.children);
+    }
+  };
+  traverseAndFind(root.children);
+
+  if (!trashFolder) {
+    let otherBookmarks = root.children.find(c => c.id === '2' || c.title === '其他书签' || c.title === 'Other bookmarks') || root.children[root.children.length - 1];
+    trashFolder = await new Promise(resolve => {
+      chrome.bookmarks.create({ parentId: otherBookmarks.id, title: UI_TEXTS.TRASH_FOLDER }, resolve);
+    });
+  }
+  return trashFolder;
+}
+
+async function moveToTrash(bookmarkId, trashFolderCache = null, metaCache = null) {
+  const bm = await new Promise(resolve => chrome.bookmarks.get(bookmarkId, res => resolve(res ? res[0] : null)));
+  if (!bm) return metaCache;
+
+  const trash = trashFolderCache || await getTrashFolder();
+  if (bm.parentId === trash.id) return metaCache; // 已经在回收站内
+
+  // 记录原始路径
+  const meta = metaCache || (await new Promise(resolve => chrome.storage.local.get('TRASH_META', resolve))).TRASH_META || {};
+  meta[bookmarkId] = bm.parentId;
+
+  // 如果没有传入缓存，说明是单条操作，立即写入
+  if (!metaCache) {
+    await new Promise(resolve => chrome.storage.local.set({ TRASH_META: meta }, resolve));
+  }
+
+  await new Promise((resolve, reject) => {
+    chrome.bookmarks.move(bookmarkId, { parentId: trash.id }, () => {
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve();
+    });
+  });
+
+  return meta;
+}
 
 // Offscreen Document 管理
 class OffscreenManager {
@@ -364,6 +415,11 @@ class SemanticSearchEngine {
     const getAllBookmarksRecursive = (nodes, currentPath = '', parentId = null) => {
       let bookmarks = [];
       for (const node of nodes) {
+        // 关键屏蔽：回收站文件夹及其内部的所有内容，彻底阻断其参与检索、聚类、特征提取
+        if (node.title === UI_TEXTS.TRASH_FOLDER && !node.url) {
+          continue;
+        }
+
         if (node.url) {
           bookmarks.push({ ...node, folderPath: currentPath, parentId: node.parentId });
         }
@@ -1283,13 +1339,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 批量删除书签
+  // 批量移入回收站（优化：缓存 trashFolder 和 meta，减少重复 IO）
   if (messageType === 'DELETE_MULTIPLE_BOOKMARKS') {
     (async () => {
       try {
+        const trash = await getTrashFolder();
+        let meta = (await new Promise(resolve => chrome.storage.local.get('TRASH_META', resolve))).TRASH_META || {};
         for (let id of request.bookmarkIds) {
-          await new Promise(resolve => chrome.bookmarks.remove(id, resolve));
+          meta = await moveToTrash(id, trash, meta);
         }
+        await new Promise(resolve => chrome.storage.local.set({ TRASH_META: meta }, resolve));
         sendResponse({ success: true });
       } catch (e) {
         sendResponse({ success: false, error: e.message });
@@ -1339,15 +1398,104 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 删除书签
+  // (getTrashFolder 和 moveToTrash 已提升到文件顶部 UI_TEXTS 下方)
+
+  // 移入回收站
   if (messageType === 'DELETE_BOOKMARK') {
-    chrome.bookmarks.remove(request.bookmarkId, () => {
-      sendResponse({ success: !chrome.runtime.lastError, error: chrome.runtime.lastError?.message });
-    });
+    (async () => {
+      try {
+        await moveToTrash(request.bookmarkId);
+        sendResponse({ success: true });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
     return true;
   }
 
-  // 删除真实的Twitter本地文件夹
+  // 恢复书签
+  if (messageType === 'RESTORE_BOOKMARK') {
+    (async () => {
+      try {
+        const { TRASH_META = {} } = await new Promise(resolve => chrome.storage.local.get('TRASH_META', resolve));
+        const originalParentId = TRASH_META[request.bookmarkId];
+
+        let targetParentId = originalParentId;
+
+        // 检查原文件夹是否还存在
+        if (originalParentId) {
+          const parentExists = await new Promise(resolve => chrome.bookmarks.get(originalParentId, res => resolve(!!res)));
+          if (!parentExists) targetParentId = null;
+        }
+
+        if (!targetParentId) {
+          let foldersTree = await new Promise(resolve => chrome.bookmarks.getTree(resolve));
+          let root = foldersTree[0];
+          let otherBookmarks = root.children.find(c => c.id === '2' || c.title === '其他书签' || c.title === 'Other bookmarks') || root.children[root.children.length - 1];
+          targetParentId = otherBookmarks.id;
+        }
+
+        await new Promise((resolve, reject) => {
+          chrome.bookmarks.move(request.bookmarkId, { parentId: targetParentId }, () => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve();
+          });
+        });
+
+        // 清除元数据
+        delete TRASH_META[request.bookmarkId];
+        await new Promise(resolve => chrome.storage.local.set({ TRASH_META }, resolve));
+
+        sendResponse({ success: true });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  }
+
+  // 彻底删除单个书签（同步清理 TRASH_META）
+  if (messageType === 'PERMANENT_DELETE_BOOKMARK') {
+    (async () => {
+      try {
+        await new Promise((resolve, reject) => {
+          chrome.bookmarks.remove(request.bookmarkId, () => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve();
+          });
+        });
+        // 清理幽灵元数据
+        const { TRASH_META = {} } = await new Promise(resolve => chrome.storage.local.get('TRASH_META', resolve));
+        delete TRASH_META[request.bookmarkId];
+        await new Promise(resolve => chrome.storage.local.set({ TRASH_META }, resolve));
+        sendResponse({ success: true });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  }
+
+  // 清空回收站
+  if (messageType === 'EMPTY_TRASH') {
+    (async () => {
+      try {
+        const trash = await getTrashFolder();
+        if (trash.children || (await new Promise(resolve => chrome.bookmarks.getChildren(trash.id, resolve))).length > 0) {
+          // 直接 removeTree 删除再重建，最快
+          await new Promise(resolve => chrome.bookmarks.removeTree(trash.id, resolve));
+          // 顺便清空所有的 TRASH_META
+          await new Promise(resolve => chrome.storage.local.remove('TRASH_META', resolve));
+        }
+        sendResponse({ success: true });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  }
+
+  // 删除真实的Twitter本地文件夹（改为移入回收站）
   if (messageType === 'DELETE_TWITTER_FOLDER') {
     (async () => {
       try {
@@ -1368,6 +1516,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (twitterFolder && twitterFolder.children) {
           const target = twitterFolder.children.find(c => c.title === folderName && !c.url);
           if (target) {
+            // 将文件夹内所有书签逐条移入回收站
+            const trash = await getTrashFolder();
+            let meta = (await new Promise(resolve => chrome.storage.local.get('TRASH_META', resolve))).TRASH_META || {};
+            const children = await new Promise(resolve => chrome.bookmarks.getChildren(target.id, resolve));
+            for (const child of children) {
+              if (child.url) {
+                meta = await moveToTrash(child.id, trash, meta);
+              }
+            }
+            await new Promise(resolve => chrome.storage.local.set({ TRASH_META: meta }, resolve));
+            // 删除空壳文件夹
             await new Promise((resolve, reject) => {
               chrome.bookmarks.removeTree(target.id, () => {
                 if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
@@ -1691,7 +1850,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
   }
 
-  // 获取仪表盘数据
+  // 获取仪表盘数据（不含回收站）
   if (messageType === 'GET_DASHBOARD_DATA') {
     (async () => {
       try {
@@ -1703,7 +1862,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         for (const bm of all) {
           totalCount++;
-          // 把推特相关的挑出来
           if (bm.title && bm.title.includes('[X推文]')) {
             xBookmarks.push(bm);
           }
@@ -1723,6 +1881,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           isInitialized: searchEngine.isInitialized,
           progress: searchEngine.initProgress
         });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  }
+
+  // 获取回收站数据（独立 API，给 tab-trash 使用）
+  if (messageType === 'GET_TRASH_DATA') {
+    (async () => {
+      try {
+        const trash = await getTrashFolder();
+        const children = await new Promise(resolve => chrome.bookmarks.getChildren(trash.id, resolve));
+        const { TRASH_META = {} } = await new Promise(resolve => chrome.storage.local.get('TRASH_META', resolve));
+
+        const trashItems = children.filter(c => c.url).map(c => ({
+          ...c,
+          originalParentId: TRASH_META[c.id] || null
+        }));
+
+        sendResponse({ success: true, items: trashItems, count: trashItems.length });
       } catch (e) {
         sendResponse({ success: false, error: e.message });
       }
@@ -1802,7 +1981,14 @@ chrome.bookmarks.onRemoved.addListener((id, removeInfo) => {
 
 chrome.bookmarks.onMoved.addListener(async (id, moveInfo) => {
   if (searchEngine.isInitialized) {
-    triggerBookmarkSync(); // 对于路径改变，触发重扫
+    // 如果是移入/移出回收站的操作，不触发无意义的增量更新
+    try {
+      const trash = await getTrashFolder();
+      if (moveInfo.parentId === trash.id || moveInfo.oldParentId === trash.id) {
+        return; // 跳过回收站相关的 move 事件
+      }
+    } catch (e) { /* ignore */ }
+    triggerBookmarkSync();
   }
 });
 

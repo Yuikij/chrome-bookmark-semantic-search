@@ -274,6 +274,36 @@ document.addEventListener('DOMContentLoaded', () => {
     if (twDrawerClose) twDrawerClose.addEventListener('click', window.closeTwDrawer);
     if (twDrawerOverlay) twDrawerOverlay.addEventListener('click', window.closeTwDrawer);
 
+    // Native Bookmark Drawer Logic
+    const bmDrawerOverlay = document.getElementById('bmDrawerOverlay');
+    const bmDrawerPanel = document.getElementById('bmDrawerPanel');
+    const bmDrawerClose = document.getElementById('bmDrawerClose');
+
+    window.closeBmDrawer = function () {
+        if (bmDrawerOverlay && bmDrawerPanel) {
+            bmDrawerOverlay.classList.remove('open');
+            bmDrawerPanel.classList.remove('open');
+        }
+        // 销毁 iframe 释放内存
+        const wrap = document.getElementById('bmIframeWrap');
+        if (wrap) {
+            const oldIframe = wrap.querySelector('iframe');
+            if (oldIframe) oldIframe.remove();
+            const loading = document.getElementById('bmIframeLoading');
+            if (loading) loading.classList.remove('hidden');
+        }
+        window._currentBmViewerId = null;
+        // 清除 declarativeNetRequest 动态规则
+        try {
+            chrome.declarativeNetRequest.updateDynamicRules({
+                removeRuleIds: [99001, 99002]
+            });
+        } catch (e) { /* ignore */ }
+    }
+
+    if (bmDrawerClose) bmDrawerClose.addEventListener('click', window.closeBmDrawer);
+    if (bmDrawerOverlay) bmDrawerOverlay.addEventListener('click', window.closeBmDrawer);
+
     // Tab 切换逻辑
     const tabBtns = document.querySelectorAll('.tab-btn');
     const tabTwitterControls = document.getElementById('tab-twitter-controls');
@@ -287,6 +317,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (tabTwitterControls) {
                 tabTwitterControls.style.display = target === 'tab-twitter' ? 'flex' : 'none';
+            }
+
+            // 如果第一次点击推特 tab 且没有任何分类，自动触发聚类
+            if (target === 'tab-twitter') {
+                const categorizeBtn = document.getElementById('categorizeTwitterBtn');
+                const listPane = document.getElementById('xListPane');
+                if (!window._hasAutoClusteredTwitter && window._globalXCount > 0 && listPane && !listPane.querySelector('.folder-item')) {
+                    window._hasAutoClusteredTwitter = true;
+                    if (categorizeBtn && !categorizeBtn.disabled) {
+                        categorizeBtn.click();
+                    }
+                }
+            }
+
+            // 点击回收站 tab 时自动加载数据
+            if (target === 'tab-trash') {
+                loadTrashData();
             }
         });
     });
@@ -331,6 +378,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             totalBookmarksEl.innerText = res.total || 0;
             const xCount = (res.xBookmarks || []).length;
+            window._globalXCount = xCount;
             if (totalXBookmarksEl) totalXBookmarksEl.innerText = xCount;
 
             if (res.isInitialized) {
@@ -347,6 +395,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (indexViewEl) {
                 indexViewEl.innerHTML = '';
+                const folderContentPane = document.getElementById('folderContentPane');
+                const folderContentEmpty = document.getElementById('folderContentEmpty');
+
+                // Reset the content pane entirely whenever we redraw
+                if (folderContentPane) {
+                    Array.from(folderContentPane.children).forEach(child => {
+                        if (child.id !== 'folderContentEmpty') child.remove();
+                    });
+                    if (folderContentEmpty) folderContentEmpty.style.display = 'flex';
+                }
+
                 if (foldersArray.length === 0) {
                     indexViewEl.innerHTML = '<div style="color: #999; text-align: center; padding: 40px;">暂无书签数据</div>';
                 } else {
@@ -355,26 +414,63 @@ document.addEventListener('DOMContentLoaded', () => {
                         div.className = 'folder-item';
 
                         let bmsHtml = bookmarks.map(b => `
-                            <div class="bm-row">
-                                <a href="${escapeHtml(b.url)}" target="_blank" class="bm-title">${escapeHtml(b.title || '无标题')}</a>
-                                <div class="bm-url">${escapeHtml(b.url)}</div>
+                            <div class="bm-row" style="flex-direction: row; justify-content: space-between; align-items: center;">
+                                <div style="flex: 1; min-width: 0; cursor: pointer;" class="bm-detail-trigger" data-id="${b.id}" data-url="${escapeHtml(b.url)}" data-title="${escapeHtml(b.title || '无标题')}" data-date="${b.dateAdded || ''}" data-folder="${escapeHtml(path)}">
+                                    <div class="bm-title" style="color:var(--accent); font-weight:600;">${escapeHtml(b.title || '无标题')}</div>
+                                    <div class="bm-url">${escapeHtml(b.url)}</div>
+                                </div>
+                                <div style="display:flex; gap:6px; align-items:center;">
+                                    <button class="btn btn-danger btn-trash-bm" data-id="${b.id}" style="padding: 4px 8px; font-size:12px;">🗑️ 移入回收站</button>
+                                </div>
                             </div>
                         `).join('');
 
                         div.innerHTML = `
-                            <div class="folder-title">
-                                <span>📁 ${escapeHtml(path)}</span>
+                            <div class="folder-title" style="border-left: 3px solid transparent; transition: 0.2s;">
+                                <span style="font-weight: 500;">📁 ${escapeHtml(path)}</span>
                                 <span class="folder-status">${bookmarks.length} 条</span>
                             </div>
-                            <div class="folder-content">
+                            <div class="folder-content" style="display: none;">
                                 ${bmsHtml}
                             </div>
                         `;
 
-                        // 点击展开折叠
-                        div.querySelector('.folder-title').addEventListener('click', function () {
-                            const content = this.nextElementSibling;
-                            content.classList.toggle('open');
+                        const contentDiv = div.querySelector('.folder-content');
+                        if (contentDiv) {
+                            contentDiv.originalParent = div;
+                            div._myContentDiv = contentDiv;
+                        }
+
+                        // 点击展开折叠到右侧面板
+                        div.querySelector('.folder-title').addEventListener('click', function (e) {
+                            // 移除所有的高亮
+                            document.querySelectorAll('#indexView .folder-title').forEach(el => {
+                                el.style.background = '';
+                                el.style.borderLeftColor = 'transparent';
+                            });
+                            // 当前项高亮
+                            this.style.background = 'var(--bg-active)';
+                            this.style.borderLeftColor = 'var(--accent)';
+
+                            // 隐藏所有右侧内容并送回原处
+                            if (folderContentPane) {
+                                if (folderContentEmpty) folderContentEmpty.style.display = 'none';
+
+                                Array.from(folderContentPane.children).forEach(child => {
+                                    if (child.id !== 'folderContentEmpty' && child.classList.contains('folder-content')) {
+                                        child.style.display = 'none';
+                                        if (child.originalParent) {
+                                            child.originalParent.appendChild(child);
+                                        }
+                                    }
+                                });
+
+                                // 将当前分类的内容送入右侧面板
+                                if (div._myContentDiv) {
+                                    div._myContentDiv.style.display = 'block';
+                                    folderContentPane.appendChild(div._myContentDiv);
+                                }
+                            }
                         });
 
                         indexViewEl.appendChild(div);
@@ -394,6 +490,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 } else {
                     if (rawCountLabel) rawCountLabel.innerHTML = `共有 <b>${xCount}</b> 条推特书签。`;
+
+                    // 如果推特 tab 已经是 active 状态（比如刷新页面时停留在此），自动触发
+                    const twTab = document.getElementById('tab-twitter');
+                    if (twTab && twTab.classList.contains('active')) {
+                        if (!window._hasAutoClusteredTwitter) {
+                            window._hasAutoClusteredTwitter = true;
+                            const categorizeBtn = document.getElementById('categorizeTwitterBtn');
+                            if (categorizeBtn && !categorizeBtn.disabled) {
+                                categorizeBtn.click();
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -404,6 +512,161 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 全局状态：当前待保存的聚类草稿 (folderName -> [bookmarkId]) ---
     window.currentDrafts = {};
+
+    // ── Contextual Toolbar: render action buttons for the selected folder ──
+    function updateFolderToolbar(folderDiv) {
+        const toolbar = document.getElementById('xFolderToolbar');
+        const toolbarName = document.getElementById('xToolbarFolderName');
+        const toolbarActions = document.getElementById('xToolbarActions');
+        if (!toolbar || !toolbarName || !toolbarActions) return;
+
+        const meta = folderDiv._folderMeta;
+        if (!meta) return;
+
+        toolbar.style.display = 'block';
+        toolbarName.textContent = '📁 ' + meta.categoryName;
+        toolbarActions.innerHTML = '';
+
+        const { isUserFolder, bmIds } = meta;
+
+        // ✏️ Rename button
+        const renameBtn = document.createElement('button');
+        renameBtn.className = 'btn';
+        renameBtn.style.cssText = 'padding:5px 10px; font-size:12px;';
+        renameBtn.innerHTML = '✏️ 命名';
+        renameBtn.addEventListener('click', async () => {
+            const oldName = meta.categoryName;
+            const newName = await cPrompt('给这批推文文件夹起个新名字：', oldName);
+            if (newName && newName.trim() !== '' && newName.trim() !== oldName) {
+                const trimmed = newName.trim();
+                if (isUserFolder) {
+                    folderDiv.querySelector('.folder-name-text').innerHTML = '📁 ' + escapeHtml(trimmed) + ' <span style="color:var(--warning-text);font-size:12px;">(📝 待保存)</span>';
+
+                    window.pendingRenames = window.pendingRenames || {};
+                    window.pendingRenames[meta._actualOldName || oldName] = trimmed;
+                    if (!meta._actualOldName) meta._actualOldName = oldName;
+                } else {
+                    folderDiv.querySelector('.folder-name-text').innerHTML = '📁 ' + escapeHtml(trimmed);
+                    folderDiv.querySelectorAll('[data-name]').forEach(el => el.setAttribute('data-name', trimmed));
+                    if (window.currentDrafts[oldName]) {
+                        window.currentDrafts[trimmed] = window.currentDrafts[oldName];
+                        delete window.currentDrafts[oldName];
+                    } else {
+                        window.currentDrafts[trimmed] = bmIds;
+                    }
+                }
+                meta.categoryName = trimmed;
+                folderDiv.setAttribute('data-name', trimmed);
+                toolbarName.textContent = '📁 ' + trimmed;
+                // Re-render toolbar to refresh button states
+                updateFolderToolbar(folderDiv);
+            }
+        });
+        toolbarActions.appendChild(renameBtn);
+
+        // 💾 Save Rename (for saved/user folders with pending rename)
+        if (isUserFolder && meta._actualOldName && meta._actualOldName !== meta.categoryName) {
+            const saveRenameBtn = document.createElement('button');
+            saveRenameBtn.className = 'btn btn-success';
+            saveRenameBtn.style.cssText = 'padding:5px 10px; font-size:12px;';
+            saveRenameBtn.innerHTML = '💾 保存名字';
+            saveRenameBtn.addEventListener('click', async () => {
+                const oName = meta._actualOldName;
+                const nName = meta.categoryName;
+                saveRenameBtn.innerText = '⏳ 保存中...';
+                saveRenameBtn.disabled = true;
+                chrome.runtime.sendMessage({ type: 'RENAME_TWITTER_FOLDER', oldName: oName, newName: nName }, async (res) => {
+                    if (res && res.success) {
+                        folderDiv.querySelector('.folder-name-text').innerHTML = '📁 ' + escapeHtml(nName);
+                        folderDiv.querySelectorAll('[data-name]').forEach(el => el.setAttribute('data-name', nName));
+                        meta._actualOldName = nName;
+                        if (window.pendingRenames) delete window.pendingRenames[oName];
+                        await cAlert('✅ 编辑已保存');
+                        updateFolderToolbar(folderDiv);
+                    } else {
+                        saveRenameBtn.innerText = '💾 保存失败';
+                        saveRenameBtn.disabled = false;
+                        cAlert('❌ 保存失败:' + res?.error);
+                    }
+                });
+            });
+            toolbarActions.appendChild(saveRenameBtn);
+        }
+
+        // 💾 Sync / Archive (for draft folders only)
+        if (!isUserFolder) {
+            const syncBtn = document.createElement('button');
+            syncBtn.className = 'btn btn-success';
+            syncBtn.style.cssText = 'padding:5px 10px; font-size:12px;';
+            syncBtn.innerHTML = '💾 归档入库';
+            syncBtn.addEventListener('click', async () => {
+                const folderName = meta.categoryName;
+                const confirmed = await cConfirm(`此操作将在 Chrome 中建真实文件夹存放 <b>${escapeHtml(folderName)}</b> 书签，你确定保存吗？`);
+                if (!confirmed) return;
+                syncBtn.innerText = '⏳ 保存中...';
+                syncBtn.disabled = true;
+                chrome.runtime.sendMessage({ type: 'SYNC_MULTIPLE_TWITTER_FOLDERS', folders: { [folderName]: bmIds } }, async (res) => {
+                    if (res && res.success) {
+                        delete window.currentDrafts[folderName];
+                        meta.isUserFolder = true;
+                        folderDiv.setAttribute('data-isuser', 'true');
+                        await cAlert('✅ 成功保存！');
+                        folderDiv.querySelectorAll('.folder-badge').forEach(b => {
+                            b.innerText = '已保存';
+                            b.style = 'background:var(--success-bg); color:var(--success-text); border:1px solid var(--success-border); padding:2px 6px; border-radius:4px; font-size:10px;';
+                        });
+                        folderDiv.querySelector('.folder-title').style.borderLeftColor = 'var(--success-text)';
+                        updateFolderToolbar(folderDiv);
+                    } else {
+                        await cAlert('❌ 保存失败: ' + (res?.error || '未知错误'));
+                        syncBtn.innerText = '💾 重试';
+                        syncBtn.disabled = false;
+                    }
+                });
+            });
+            toolbarActions.appendChild(syncBtn);
+        }
+
+        // 🗑️ Delete folder
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn';
+        deleteBtn.style.cssText = 'padding:5px 10px; font-size:12px; color: var(--danger-btn);';
+        deleteBtn.innerHTML = '🗑️ 删除';
+        deleteBtn.addEventListener('click', async () => {
+            const folderName = meta.categoryName;
+            const confirmed = await cConfirm(`确定要彻底删除 ${isUserFolder ? '已保存分类' : '临时草稿'} <b>${escapeHtml(folderName)}</b> 及里面所有的推文吗？<br><br><b>警告：这会导致这些书签从 Chrome 中永久抹除！</b>`);
+            if (!confirmed) return;
+            deleteBtn.innerText = '⏳ 删除中...';
+            deleteBtn.disabled = true;
+
+            const msgType = isUserFolder ? 'DELETE_TWITTER_FOLDER' : 'DELETE_MULTIPLE_BOOKMARKS';
+            const msgPayload = isUserFolder ? { type: msgType, folderName } : { type: msgType, bookmarkIds: bmIds };
+
+            chrome.runtime.sendMessage(msgPayload, async (res) => {
+                if (res && res.success) {
+                    if (!isUserFolder) delete window.currentDrafts[folderName];
+                    // Cleanup right pane if this folder was showing
+                    if (folderDiv._myContentDiv && folderDiv._myContentDiv.parentElement && folderDiv._myContentDiv.parentElement.id === 'xContentPane') {
+                        folderDiv._myContentDiv.remove();
+                        const emptyState = document.getElementById('xContentEmpty');
+                        if (emptyState) emptyState.style.display = 'flex';
+                    }
+                    folderDiv.style.transition = 'opacity 0.3s, max-height 0.3s';
+                    folderDiv.style.opacity = '0';
+                    folderDiv.style.maxHeight = '0';
+                    folderDiv.style.overflow = 'hidden';
+                    setTimeout(() => folderDiv.remove(), 300);
+                    // Hide toolbar
+                    toolbar.style.display = 'none';
+                } else {
+                    deleteBtn.innerText = '🗑️ 重试';
+                    deleteBtn.disabled = false;
+                    cAlert('❌ 删除失败:' + res?.error);
+                }
+            });
+        });
+        toolbarActions.appendChild(deleteBtn);
+    }
 
     function renderTwitterFolderSection(categoryName, bookmarks, isUserFolder, containerEl) {
         const div = document.createElement('div');
@@ -439,18 +702,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Optimistically move node in DOM
                 const movedItem = document.querySelector(`.tw-list-item .inline-dispatch-btn[data-id="${bmId}"]`)?.closest('.tw-list-item');
                 if (movedItem) {
-                    const contentContainer = div.querySelector('.folder-content');
+                    const contentContainer = div._myContentDiv || div.querySelector('.folder-content');
                     const sourceFolderContent = movedItem.closest('.folder-content');
 
                     if (sourceFolderContent) {
-                        const status = sourceFolderContent.previousElementSibling?.querySelector('.folder-status');
+                        const sourceTitle = sourceFolderContent.originalParent || sourceFolderContent.previousElementSibling;
+                        const status = sourceTitle?.querySelector('.folder-status');
                         if (status) {
                             let c = parseInt(status.innerText);
                             if (!isNaN(c) && c > 0) status.innerText = (c - 1) + ' 条';
                         }
                     }
                     if (contentContainer) {
-                        contentContainer.insertBefore(movedItem, contentContainer.firstChild);
+                        const firstItem = contentContainer.querySelector('.tw-list-item');
+                        if (firstItem) {
+                            contentContainer.insertBefore(movedItem, firstItem);
+                        } else {
+                            contentContainer.appendChild(movedItem);
+                        }
                     }
                     movedItem.setAttribute('data-category', targetCategory);
                     const destStatus = div.querySelector('.folder-title .folder-status');
@@ -533,8 +802,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     <div class="list-snippet" style="min-width:0; align-self:center;">${escapeHtml(text)}</div>
 
-                    <div class="list-col" style="justify-content:center;">
-                        ${meta.mediaUrl ? `<img src="${meta.mediaUrl}" style="height:32px; width:48px; object-fit:cover; border-radius:4px; border:1px solid var(--border-color);"/>` : `<span style="color:var(--text-muted);">-</span>`}
+                    <div class="list-col" style="justify-content:center; position:relative;">
+                        ${meta.mediaUrl ? `<img src="${meta.mediaUrl}" style="height:32px; width:48px; object-fit:cover; border-radius:4px; border:1px solid var(--border-color);"/>${meta.isVideo ? '<div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); color:white; font-size:16px; text-shadow: 0 1px 3px rgba(0,0,0,0.8); pointer-events:none;">▶</div>' : ''}` : `<span style="color:var(--text-muted);">-</span>`}
                     </div>
 
                     <div class="list-col" style="color:var(--text-sec); font-family:monospace;">${meta.views !== '-' ? meta.views : '-'}</div>
@@ -549,17 +818,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('') : `<div style="padding: 20px; color: var(--text-sec); text-align:center;">暂无推文</div>`;
 
         div.innerHTML = `
-            <div class="folder-title" style="border-left: 3px solid ${borderColor}; display:flex; justify-content:space-between; align-items:center;">
-                <div style="display:flex; align-items:center; gap: 8px;">
-                    <span class="folder-name-text" style="color:var(--text-main);">📁 ${escapeHtml(categoryName)}</span>
-                    <span class="folder-status">${bookmarks.length}</span>
-                    <span style="font-size:10px; padding:2px 6px; border-radius:4px; ${badgeStyle}">${badge}</span>
+            <div class="folder-title" style="border-left: 3px solid ${borderColor}; display:flex; flex-direction:column; align-items:flex-start; gap:6px; padding: 12px 14px; cursor:pointer;">
+                <div style="display:flex; align-items:center; width: 100%;">
+                    <span class="folder-name-text" style="color:var(--text-main); font-weight:500; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(categoryName)}">📁 ${escapeHtml(categoryName)}</span>
                 </div>
-                <div style="display:flex; gap: 6px;">
-                    <button class="btn btn-rename" data-oldname="${escapeHtml(categoryName)}" data-isuser="${isUserFolder}" style="padding: 4px 8px; font-size: 11px;">✏️ 命名</button>
-                    ${isUserFolder ? `<button class="btn btn-save-rename btn-success" data-oldname="${escapeHtml(categoryName)}" data-actual-old="${escapeHtml(categoryName)}" style="display:none; padding: 4px 8px; font-size: 11px;">💾 保存名字</button>` : ''}
-                    ${!isUserFolder ? `<button class="btn btn-sync-folder btn-success" data-name="${escapeHtml(categoryName)}" data-ids='${JSON.stringify(bmIds)}' style="padding: 4px 8px; font-size: 11px;">💾 归档入库</button>` : ''}
-                    <button class="btn btn-delete-folder" data-name="${escapeHtml(categoryName)}" data-isuser="${isUserFolder}" style="padding: 4px 8px; font-size: 11px; color: var(--danger-btn);">🗑️ 删除</button>
+                <div style="display:flex; align-items:center; gap: 6px;">
+                    <span class="folder-status" style="background:var(--bg-active); border:none; padding:2px 6px; border-radius:4px; font-size:11px; color:var(--text-sec);">${bookmarks.length} 条</span>
+                    <span class="folder-badge" style="font-size:10px; padding:2px 6px; border-radius:4px; ${badgeStyle}">${badge}</span>
                 </div>
             </div>
             <div class="folder-content">
@@ -578,110 +843,62 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${bmsHtml}
             </div>`;
 
-        // 绑定各种文件夹自身的事件
-        // Rename (Draft or Saved)
-        const renameBtn = div.querySelector('.btn-rename');
-        if (renameBtn) {
-            renameBtn.addEventListener('click', async function (e) {
-                e.stopPropagation();
-                const oldName = this.getAttribute('data-oldname');
-                const isUserF = this.getAttribute('data-isuser') === 'true';
-                const newName = await cPrompt(`给这批推文文件夹起个新名字：`, oldName);
-                if (newName && newName.trim() !== '' && newName.trim() !== oldName) {
-                    const trimmed = newName.trim();
-                    if (isUserF) {
-                        div.querySelector('.folder-name-text').innerHTML = '📁 ' + escapeHtml(trimmed) + ' <span style="color:var(--warning-text);font-size:12px;">(📝 待保存)</span>';
+        // Store folder metadata on the div for toolbar access
+        div._folderMeta = {
+            categoryName,
+            isUserFolder,
+            bmIds,
+            borderColor,
+            badge,
+            badgeStyle
+        };
 
-                        const saveRenameBtn = div.querySelector('.btn-save-rename');
-                        if (saveRenameBtn) {
-                            const actualOld = saveRenameBtn.getAttribute('data-actual-old') || oldName;
-                            saveRenameBtn.setAttribute('data-newname', trimmed);
-                            saveRenameBtn.style.display = 'inline-block';
+        // Initialize content div tracking for Split Pane logic
+        const contentDiv = div.querySelector('.folder-content');
+        if (contentDiv) {
+            contentDiv.originalParent = div;
+            div._myContentDiv = contentDiv;
+            // hide initially since they will be placed in Right Pane on click
+            contentDiv.style.display = 'none';
+        }
 
-                            window.pendingRenames = window.pendingRenames || {};
-                            window.pendingRenames[actualOld] = trimmed;
-                        }
+        // ── Folder click: update toolbar + right pane ──
+        div.querySelector('.folder-title').addEventListener('click', function (e) {
+            if (e.target.tagName.toLowerCase() === 'button') return;
 
-                        this.setAttribute('data-oldname', trimmed);
-                    } else {
-                        div.querySelector('.folder-name-text').innerHTML = '📁 ' + escapeHtml(trimmed);
-                        div.querySelectorAll('[data-name]').forEach(el => el.setAttribute('data-name', trimmed));
-                        this.setAttribute('data-oldname', trimmed);
-                        if (window.currentDrafts[oldName]) {
-                            window.currentDrafts[trimmed] = window.currentDrafts[oldName];
-                            delete window.currentDrafts[oldName];
-                        } else {
-                            window.currentDrafts[trimmed] = bmIds;
-                        }
+            // Highlight selected folder
+            document.querySelectorAll('#xListPane .folder-title').forEach(el => {
+                el.style.background = '';
+                const isUserF = el.parentElement.getAttribute('data-isuser') === 'true';
+                el.style.borderLeftColor = isUserF ? 'var(--success-text)' : 'var(--warning-text)';
+            });
+            this.style.background = 'var(--bg-active)';
+            this.style.borderLeftColor = 'var(--accent)';
+
+            // ── Update toolbar ──
+            window._selectedFolderDiv = div;
+            updateFolderToolbar(div);
+
+            // ── Update right pane ──
+            const contentPane = document.getElementById('xContentPane');
+            const emptyState = document.getElementById('xContentEmpty');
+            if (emptyState) emptyState.style.display = 'none';
+
+            // Send existing content back to their respective divs
+            Array.from(contentPane.children).forEach(child => {
+                if (child.id !== 'xContentEmpty' && child.classList.contains('folder-content')) {
+                    child.style.display = 'none';
+                    if (child.originalParent) {
+                        child.originalParent.appendChild(child);
                     }
                 }
             });
-        }
 
-        // Save rename (Saved folders)
-        const saveRenameBtn = div.querySelector('.btn-save-rename');
-        if (saveRenameBtn) {
-            saveRenameBtn.addEventListener('click', async function (e) {
-                e.stopPropagation();
-                const oName = this.getAttribute('data-actual-old');
-                const nName = this.getAttribute('data-newname');
-                this.innerText = '⏳ 保存中...';
-                this.disabled = true;
-                chrome.runtime.sendMessage({ type: 'RENAME_TWITTER_FOLDER', oldName: oName, newName: nName }, async (res) => {
-                    if (res && res.success) {
-                        this.style.display = 'none';
-                        this.innerText = '💾 保存名字';
-                        this.disabled = false;
-                        div.querySelector('.folder-name-text').innerHTML = '📁 ' + escapeHtml(nName);
-
-                        this.setAttribute('data-actual-old', nName);
-                        if (renameBtn) renameBtn.setAttribute('data-oldname', nName);
-                        div.querySelectorAll('[data-name]').forEach(el => el.setAttribute('data-name', nName));
-
-                        if (window.pendingRenames) delete window.pendingRenames[oName];
-                        await cAlert('✅ 编辑已保存');
-                    } else {
-                        this.innerText = '💾 保存失败';
-                        this.disabled = false;
-                        cAlert('❌ 保存失败:' + res?.error);
-                    }
-                });
-            });
-        }
-
-        // Sync folder
-        const syncBtn = div.querySelector('.btn-sync-folder');
-        if (syncBtn) {
-            syncBtn.addEventListener('click', async function (e) {
-                e.stopPropagation();
-                const folderName = this.getAttribute('data-name');
-                const ids = JSON.parse(this.getAttribute('data-ids'));
-                const confirmed = await cConfirm(`此操作将在 Chrome 中建真实文件夹存放 <b>${escapeHtml(folderName)}</b> 书签，你确定保存吗？`);
-                if (!confirmed) return;
-                const btn = this;
-                btn.innerText = '⏳ 保存中...';
-                btn.disabled = true;
-                chrome.runtime.sendMessage({ type: 'SYNC_MULTIPLE_TWITTER_FOLDERS', folders: { [folderName]: ids } }, async (res) => {
-                    if (res && res.success) {
-                        delete window.currentDrafts[folderName];
-                        btn.style.display = 'none';
-                        await cAlert(`✅ 成功保存！`);
-                        div.querySelector('.folder-name-text').parentElement.querySelector('span:last-child').innerText = '已保存';
-                        div.querySelector('.folder-name-text').parentElement.querySelector('span:last-child').style = 'background:var(--success-bg); color:var(--success-text); border:1px solid var(--success-border); padding:2px 6px; border-radius:4px; font-size:10px;';
-                        div.querySelector('.folder-title').style.borderLeftColor = 'var(--success-text)';
-                    } else {
-                        await cAlert('❌ 保存失败: ' + (res?.error || '未知错误'));
-                        btn.innerText = '💾 保存失败，重试';
-                        btn.disabled = false;
-                    }
-                });
-            });
-        }
-
-        // Folder toggle
-        div.querySelector('.folder-title').addEventListener('click', function (e) {
-            if (e.target.tagName.toLowerCase() === 'button') return;
-            this.nextElementSibling.classList.toggle('open');
+            // Put current content into pane
+            if (contentDiv) {
+                contentDiv.style.display = 'block';
+                contentPane.appendChild(contentDiv);
+            }
         });
 
         // 注入到 DOM 后，再绑定详细推文的点击事件（Twillot大视图）
@@ -781,52 +998,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // Delete folder
-        const deleteBtn = div.querySelector('.btn-delete-folder');
-        if (deleteBtn) {
-            deleteBtn.addEventListener('click', async function (e) {
-                e.stopPropagation();
-                const folderName = this.getAttribute('data-name');
-                const isUserF = this.getAttribute('data-isuser') === 'true';
-
-                const confirmed = await cConfirm(`确定要彻底删除 ${isUserF ? '已保存分类' : '临时草稿'} <b>${escapeHtml(folderName)}</b> 及里面所有的推文吗？<br><br><b>警告：这会导致这些书签从 Chrome 中永久抹除！</b>`);
-                if (confirmed) {
-                    this.innerText = '⏳ 删除中...';
-                    this.disabled = true;
-                    if (isUserF) {
-                        chrome.runtime.sendMessage({ type: 'DELETE_TWITTER_FOLDER', folderName }, async (res) => {
-                            if (res && res.success) {
-                                div.style.transition = 'opacity 0.3s, max-height 0.3s';
-                                div.style.opacity = '0';
-                                div.style.maxHeight = '0';
-                                div.style.overflow = 'hidden';
-                                setTimeout(() => div.remove(), 300);
-                            } else {
-                                this.innerText = '🗑️ 重试';
-                                this.disabled = false;
-                                cAlert('❌ 删除失败:' + res?.error);
-                            }
-                        });
-                    } else {
-                        chrome.runtime.sendMessage({ type: 'DELETE_MULTIPLE_BOOKMARKS', bookmarkIds: bmIds }, async (res) => {
-                            if (res && res.success) {
-                                delete window.currentDrafts[folderName];
-                                div.style.transition = 'opacity 0.3s, max-height 0.3s';
-                                div.style.opacity = '0';
-                                div.style.maxHeight = '0';
-                                div.style.overflow = 'hidden';
-                                setTimeout(() => div.remove(), 300);
-                            } else {
-                                this.innerText = '🗑️ 重试';
-                                this.disabled = false;
-                                cAlert('❌ 删除失败:' + res?.error);
-                            }
-                        });
-                    }
-                }
-            });
-        }
-
         containerEl.appendChild(div);
     }
 
@@ -852,7 +1023,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 <div class="detail-text">${escapeHtml(data.text)}</div>
                 
-                ${data.meta.mediaUrl ? `
+                ${data.meta.isVideo && data.meta.videoUrl ? `
+                <div class="detail-media">
+                    <video controls src="${data.meta.videoUrl}" poster="${data.meta.mediaUrl}" style="max-width: 100%; max-height: 450px; border-radius: 12px; border: 1px solid var(--border-color); background: #000;"></video>
+                </div>` : data.meta.mediaUrl ? `
                 <div class="detail-media">
                     <img src="${data.meta.mediaUrl}" class="media-thumb" title="点击查看大图" />
                 </div>` : ''}
@@ -964,8 +1138,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 twitterCategorizeStatus.style.display = 'none';
 
-                // Clear xListPane
+                // Clear xListPane, xContentPane, and toolbar
                 xListPane.innerHTML = '';
+                const xContentPane = document.getElementById('xContentPane');
+                if (xContentPane) {
+                    Array.from(xContentPane.children).forEach(child => {
+                        if (child.id !== 'xContentEmpty') child.remove();
+                    });
+                    const emptyState = document.getElementById('xContentEmpty');
+                    if (emptyState) emptyState.style.display = 'flex';
+                }
+                const xFolderToolbar = document.getElementById('xFolderToolbar');
+                if (xFolderToolbar) xFolderToolbar.style.display = 'none';
 
                 // Setup control buttons
                 twActionControls.style.display = 'flex';
@@ -1078,21 +1262,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 searchView.innerHTML = res.results.map((b, i) => {
                     const similarity = b.score || b.similarity || 0;
                     const p = Math.round(similarity * 100);
+
+                    let badgeColor, badgeBg, badgeBorder;
+                    if (p >= 80) {
+                        badgeColor = 'var(--success-text)';
+                        badgeBg = 'var(--success-bg)';
+                        badgeBorder = 'var(--success-border)';
+                    } else if (p >= 60) {
+                        badgeColor = 'var(--warning-text)';
+                        badgeBg = 'var(--warning-bg)';
+                        badgeBorder = 'var(--warning-border)';
+                    } else {
+                        badgeColor = 'var(--text-sec)';
+                        badgeBg = 'var(--bg-active)';
+                        badgeBorder = 'var(--border-color)';
+                    }
+
                     return `
-                        <div class="bm-row" style="background: white; border-radius: 8px; padding: 15px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.02); flex-direction: row; align-items: center; justify-content: space-between;">
-                            <div style="flex: 1; min-width: 0;">
-                                <a href="${escapeHtml(b.url)}" target="_blank" class="bm-title" style="font-size: 15px; color: #1e40af; text-decoration: none; font-weight: 600;">${escapeHtml(b.title || '无标题')}</a>
-                                <div class="bm-url" style="margin-top: 6px; font-size: 13px; color: #64748b;">${escapeHtml(b.url)}</div>
+                        <div class="bm-row" style="background: var(--bg-surface); border-radius: 8px; padding: 15px; border: 1px solid var(--border-color); box-shadow: 0 1px 3px var(--shadow); flex-direction: row; align-items: center; justify-content: space-between;">
+                            <div style="flex: 1; min-width: 0; cursor: pointer;" class="bm-detail-trigger" data-id="${b.id}" data-url="${escapeHtml(b.url)}" data-title="${escapeHtml(b.title || '无标题')}" data-date="${b.dateAdded || ''}" data-folder="${escapeHtml(b.folderPath || '')}">
+                                <div class="bm-title" style="font-size: 15px; color: var(--accent); font-weight: 600;">${escapeHtml(b.title || '无标题')}</div>
+                                <div class="bm-url" style="margin-top: 6px; font-size: 13px; color: var(--text-sec);">${escapeHtml(b.url)}</div>
                             </div>
-                            <div style="text-align: right; margin-left: 15px;">
-                                <span style="font-size: 12px; font-weight: bold; color: ${p >= 80 ? '#047857' : (p >= 60 ? '#b45309' : '#475569')}; background: ${p >= 80 ? '#d1fae5' : (p >= 60 ? '#fef3c7' : '#f1f5f9')}; padding: 4px 8px; border-radius: 4px; border: 1px solid ${p >= 80 ? '#34d399' : (p >= 60 ? '#fcd34d' : '#cbd5e1')};">契合度 ${p}%</span>
+                            <div style="text-align: right; margin-left: 15px; display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
+                                <span style="font-size: 12px; font-weight: bold; color: ${badgeColor}; background: ${badgeBg}; padding: 4px 8px; border-radius: 4px; border: 1px solid ${badgeBorder};">契合度 ${p}%</span>
+                                <button class="btn btn-danger btn-trash-bm" data-id="${b.id}" style="padding: 4px 8px; font-size:12px;">🗑️ 移入回收站</button>
                             </div>
                         </div>
                     `;
                 }).join('');
 
                 if (res.results.length === 0) {
-                    searchView.innerHTML = `<div style="text-align: center; padding: 60px; color: #64748b; font-size: 15px;">未找到相关结果，您的表达太个性化，还是模型太笨啦？尝试换个说法吧～</div>`;
+                    searchView.innerHTML = `<div style="text-align: center; padding: 60px; color: var(--text-sec); font-size: 15px;">未找到相关结果，您的表达太个性化，还是模型太笨啦？尝试换个说法吧～</div>`;
                 }
 
             } else {
@@ -1112,6 +1313,294 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // --- 回收站数据加载 ---
+    function loadTrashData() {
+        chrome.runtime.sendMessage({ type: 'GET_TRASH_DATA' }, (res) => {
+            const trashListContent = document.getElementById('trashListContent');
+            const trashCountSpan = document.getElementById('trashCount');
+            const emptyTrashBtn = document.querySelector('#trashToolbar .btn-empty-trash');
+
+            if (!res || !res.success) {
+                if (trashListContent) trashListContent.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-sec);">加载失败</div>';
+                return;
+            }
+
+            const items = res.items || [];
+            if (trashCountSpan) trashCountSpan.textContent = items.length > 0 ? `(${items.length})` : '';
+            if (emptyTrashBtn) emptyTrashBtn.style.display = items.length > 0 ? 'inline-flex' : 'none';
+
+            if (items.length === 0) {
+                if (trashListContent) trashListContent.innerHTML = `
+                    <div style="padding: 60px; text-align: center; color: var(--text-sec);">
+                        <div style="font-size: 40px; margin-bottom: 15px;">✨</div>
+                        <div>回收站是空的，干干净净！</div>
+                    </div>
+                `;
+                return;
+            }
+
+            if (trashListContent) {
+                trashListContent.innerHTML = items.map((b, i) => `
+                    <div class="bm-row" style="padding: 12px 20px; border-bottom: 1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+                        <div style="flex: 1; min-width: 0; cursor: pointer; display: flex; align-items: center;" class="bm-detail-trigger" data-id="${b.id}" data-url="${escapeHtml(b.url)}" data-title="${escapeHtml(b.title || '无标题')}" data-date="${b.dateAdded || ''}" data-folder="🗑️ 回收站">
+                            <span style="color: var(--text-muted); font-size: 12px; margin-right: 8px;">${i + 1}.</span>
+                            <div style="flex: 1; min-width: 0;">
+                                <div class="bm-title" style="font-size: 14px; color:var(--accent); font-weight:600;">${escapeHtml(b.title || '无标题')}</div>
+                                <div class="bm-url" style="margin-top: 4px;">${escapeHtml(b.url)}</div>
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+                            <button class="btn btn-success btn-restore-bm" data-id="${b.id}" style="padding: 4px 8px; font-size:12px;">🔄 恢复</button>
+                            <button class="btn btn-danger btn-hard-delete-bm" data-id="${b.id}" style="padding: 4px 8px; font-size:12px;">🗑️ 彻底删除</button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        });
+    }
+
+    // 书签网页预览抽屉：iframe 嵌入 + declarativeNetRequest 剥离 X-Frame-Options
+    const BM_VIEWER_RULE_IDS = [99001, 99002]; // 用于 declarativeNetRequest 的动态规则 ID
+
+    async function enableIframeForDomain(url) {
+        try {
+            const urlObj = new URL(url);
+            const domain = urlObj.hostname;
+
+            // 先清掉旧规则
+            await chrome.declarativeNetRequest.updateDynamicRules({
+                removeRuleIds: BM_VIEWER_RULE_IDS
+            });
+
+            // 添加新规则：剥离 X-Frame-Options 和 CSP frame-ancestors
+            await chrome.declarativeNetRequest.updateDynamicRules({
+                addRules: [
+                    {
+                        id: BM_VIEWER_RULE_IDS[0],
+                        priority: 1,
+                        action: {
+                            type: 'modifyHeaders',
+                            responseHeaders: [
+                                { header: 'X-Frame-Options', operation: 'remove' },
+                                { header: 'Content-Security-Policy', operation: 'remove' }
+                            ]
+                        },
+                        condition: {
+                            requestDomains: [domain],
+                            resourceTypes: ['sub_frame']
+                        }
+                    },
+                    {
+                        id: BM_VIEWER_RULE_IDS[1],
+                        priority: 1,
+                        action: {
+                            type: 'modifyHeaders',
+                            responseHeaders: [
+                                { header: 'X-Frame-Options', operation: 'remove' },
+                                { header: 'Content-Security-Policy', operation: 'remove' }
+                            ]
+                        },
+                        condition: {
+                            initiatorDomains: [chrome.runtime.id + '.chromiumapp.org'],
+                            resourceTypes: ['sub_frame']
+                        }
+                    }
+                ]
+            });
+            console.log(`✅ iframe 解锁规则已为 ${domain} 生效`);
+        } catch (e) {
+            console.warn('⚠️ declarativeNetRequest 设置失败:', e);
+        }
+    }
+
+    async function disableIframeRules() {
+        try {
+            await chrome.declarativeNetRequest.updateDynamicRules({
+                removeRuleIds: BM_VIEWER_RULE_IDS
+            });
+        } catch (e) { /* ignore */ }
+    }
+
+    async function openBmViewer(id, title, url, rowEl) {
+        window._currentBmViewerId = id;
+        window._currentBmViewerRow = rowEl;
+
+        // 填充 toolbar 信息
+        const titleEl = document.getElementById('bmViewerTitle');
+        const urlEl = document.getElementById('bmViewerUrl');
+        const openTabEl = document.getElementById('bmViewerOpenTab');
+        const trashEl = document.getElementById('bmViewerTrash');
+        if (titleEl) titleEl.textContent = title || '无标题';
+        if (urlEl) urlEl.textContent = url;
+        if (openTabEl) openTabEl.href = url;
+        if (trashEl) trashEl.setAttribute('data-id', id);
+
+        // 清理旧 iframe
+        const wrap = document.getElementById('bmIframeWrap');
+        if (wrap) {
+            const oldIframe = wrap.querySelector('iframe');
+            if (oldIframe) oldIframe.remove();
+        }
+
+        // 显示 loading
+        const loading = document.getElementById('bmIframeLoading');
+        if (loading) {
+            loading.classList.remove('hidden');
+            loading.innerHTML = `
+                <div style="font-size: 36px; margin-bottom: 12px; animation: pulse 1.5s infinite;">🌐</div>
+                <div style="color: var(--text-sec); font-size: 14px;">正在加载网页...</div>
+            `;
+        }
+
+        // 先通过 declarativeNetRequest 解锁目标域名的 iframe 限制
+        await enableIframeForDomain(url);
+
+        // 创建 iframe
+        const iframe = document.createElement('iframe');
+        iframe.src = url;
+        iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-popups allow-forms allow-top-navigation-by-user-activation');
+        iframe.setAttribute('referrerpolicy', 'no-referrer');
+        iframe.style.cssText = 'width:100%; height:100%; border:none;';
+
+        // iframe 加载成功
+        iframe.addEventListener('load', () => {
+            if (loading) loading.classList.add('hidden');
+        });
+
+        // 超时降级（部分网站可能用 JS 自行break out）
+        let fallbackTimer = setTimeout(() => {
+            if (loading && !loading.classList.contains('hidden')) {
+                loading.innerHTML = `
+                    <div style="font-size: 36px; margin-bottom: 12px;">🚫</div>
+                    <div style="color: var(--text-sec); font-size: 14px; text-align:center; max-width: 350px;">
+                        该网站通过 JavaScript 阻止了嵌入访问
+                    </div>
+                    <a href="${escapeHtml(url)}" target="_blank" class="btn btn-primary" style="margin-top: 18px; text-decoration:none; padding: 10px 24px;">🌐 在新标签页中打开</a>
+                `;
+            }
+        }, 12000);
+
+        iframe.addEventListener('load', () => clearTimeout(fallbackTimer));
+
+        if (wrap) wrap.appendChild(iframe);
+
+        // 打开 drawer
+        if (bmDrawerOverlay && bmDrawerPanel) {
+            bmDrawerOverlay.classList.add('open');
+            bmDrawerPanel.classList.add('open');
+        }
+    }
+
+    // toolbar 上的回收站按钮
+    const bmViewerTrash = document.getElementById('bmViewerTrash');
+    if (bmViewerTrash) {
+        bmViewerTrash.addEventListener('click', async function () {
+            const id = this.getAttribute('data-id');
+            if (!id) return;
+            const confirmed = await cBubbleConfirm(this, `确定要将这枚书签<br>移入回收站吗？`, 200);
+            if (confirmed) {
+                this.innerText = '⏳ 移动中...';
+                this.disabled = true;
+                chrome.runtime.sendMessage({ type: 'DELETE_BOOKMARK', bookmarkId: id }, (res) => {
+                    if (res && res.success) {
+                        if (window._currentBmViewerRow) {
+                            window._currentBmViewerRow.closest('.bm-row').remove();
+                        }
+                        window.closeBmDrawer();
+                    } else {
+                        cAlert('❌ 移动失败: ' + res?.error);
+                    }
+                    this.innerText = '🗑️ 移入回收站';
+                    this.disabled = false;
+                });
+            }
+        });
+    }
+
+    // 全局事件委派：回收站操作及书签点击
+    document.body.addEventListener('click', async (e) => {
+        // 点击书签容器打开 iframe 预览
+        const trigger = e.target.closest('.bm-detail-trigger');
+        if (trigger) {
+            const id = trigger.getAttribute('data-id');
+            const url = trigger.getAttribute('data-url');
+            const title = trigger.getAttribute('data-title');
+            openBmViewer(id, title, url, trigger);
+        }
+        // 移入回收站
+        if (e.target.classList.contains('btn-trash-bm')) {
+            const id = e.target.getAttribute('data-id');
+            const confirmed = await cBubbleConfirm(e.target, `确定要将这枚书签<br>移入回收站吗？`, 200);
+            if (confirmed) {
+                e.target.innerText = '⏳ 移动中...';
+                e.target.disabled = true;
+                chrome.runtime.sendMessage({ type: 'DELETE_BOOKMARK', bookmarkId: id }, (res) => {
+                    if (res && res.success) {
+                        e.target.closest('.bm-row').remove();
+                    } else {
+                        cAlert('❌ 移动失败: ' + res?.error);
+                        e.target.innerText = '🗑️ 移入回收站';
+                        e.target.disabled = false;
+                    }
+                });
+            }
+        }
+
+        // 恢复书签
+        if (e.target.classList.contains('btn-restore-bm')) {
+            const id = e.target.getAttribute('data-id');
+            e.target.innerText = '⏳ 恢复中...';
+            e.target.disabled = true;
+            chrome.runtime.sendMessage({ type: 'RESTORE_BOOKMARK', bookmarkId: id }, (res) => {
+                if (res && res.success) {
+                    e.target.closest('.bm-row').remove();
+                } else {
+                    cAlert('❌ 恢复失败: ' + res?.error);
+                    e.target.innerText = '🔄 恢复';
+                    e.target.disabled = false;
+                }
+            });
+        }
+
+        // 彻底删除
+        if (e.target.classList.contains('btn-hard-delete-bm')) {
+            const id = e.target.getAttribute('data-id');
+            const confirmed = await cBubbleConfirm(e.target, `<b>警告：此操作不可逆！</b><br>将会从 Chrome 中永久擦除这条书签。`, 240);
+            if (confirmed) {
+                e.target.innerText = '⏳ 处理中...';
+                e.target.disabled = true;
+                chrome.runtime.sendMessage({ type: 'PERMANENT_DELETE_BOOKMARK', bookmarkId: id }, (res) => {
+                    if (res && res.success) {
+                        e.target.closest('.bm-row').remove();
+                    } else {
+                        cAlert('❌ 彻底删除失败: ' + res?.error);
+                        e.target.innerText = '🗑️ 彻底删除';
+                        e.target.disabled = false;
+                    }
+                });
+            }
+        }
+
+        // 清空回收站
+        if (e.target.classList.contains('btn-empty-trash')) {
+            const confirmed = await cConfirm(`<b>警告：此操作将永久抹除回收站中的所有书签数据，不可恢复！</b><br><br>你确定要彻底清空吗？`, '⚠️ 清空回收站');
+            if (confirmed) {
+                e.target.innerText = '⏳ 爆炸级清空中...';
+                e.target.disabled = true;
+                chrome.runtime.sendMessage({ type: 'EMPTY_TRASH' }, async (res) => {
+                    if (res && res.success) {
+                        await cAlert('✅ 回收站已清理完毕，世界清静了。', '清理成功');
+                        loadTrashData();
+                    } else {
+                        cAlert('❌ 清空失败: ' + (res?.error || '未知原因'));
+                        e.target.innerText = '💥 一键清空回收站';
+                        e.target.disabled = false;
+                    }
+                });
+            }
+        }
+    });
 
     loadData();
 });

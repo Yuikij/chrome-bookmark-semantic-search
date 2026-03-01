@@ -269,10 +269,27 @@ class TwitterBookmarkFetcher {
 
             // 媒体信息
             let mediaUrl = '';
+            let videoUrl = '';
+            let isVideo = false;
             const mediaEntities = legacy.extended_entities?.media || legacy.entities?.media || [];
             if (mediaEntities.length > 0) {
                 const firstMedia = mediaEntities[0];
                 mediaUrl = firstMedia.media_url_https || firstMedia.media_url || '';
+
+                if (firstMedia.type === 'video' || firstMedia.type === 'animated_gif') {
+                    isVideo = true;
+                    if (firstMedia.video_info && firstMedia.video_info.variants) {
+                        const variants = firstMedia.video_info.variants.filter(v => v.content_type === 'video/mp4');
+                        if (variants.length > 0) {
+                            variants.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+                            videoUrl = variants[0].url;
+                        } else {
+                            if (firstMedia.video_info.variants.length > 0) {
+                                videoUrl = firstMedia.video_info.variants[0].url;
+                            }
+                        }
+                    }
+                }
             }
 
             // 互动数据
@@ -290,7 +307,7 @@ class TwitterBookmarkFetcher {
             const truncatedText = displayText.substring(0, 120) + (displayText.length > 120 ? '...' : '');
 
             const title = `[X推文] ${finalAuthorName}: ${truncatedText}`;
-            const metadataObj = { mediaUrl, retweets, likes, views, replies, bookmarkCount, createdAt, authorAvatar, fullText };
+            const metadataObj = { mediaUrl, videoUrl, isVideo, retweets, likes, views, replies, bookmarkCount, createdAt, authorAvatar, fullText };
             const hiddenData = ' \u200B' + JSON.stringify(metadataObj) + '\u200B';
 
             return {

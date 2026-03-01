@@ -721,7 +721,7 @@
 
         <div class="tabs">
             <button class="tab-btn active" data-target="tab-folders">📁 语义折叠树</button>
-            <button class="tab-btn" data-target="tab-twitter">🐦 推特/X 知识库</button>
+            <button class="tab-btn" data-target="tab-twitter">🐦 推特/X </button>
             <button class="tab-btn" data-target="tab-search" id="tabSearchBtn" style="display: none;">🔍 搜索结果</button>
         </div>
 
@@ -731,7 +731,7 @@
 
         <div id="tab-twitter" class="view-section">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <p style="color: var(--text-sec); margin: 0; font-size: 14px;">专属推特/X 知识库。左侧浏览列表，右侧查看详情并进行管理，体验大气舒畅。</p>
+                <p style="color: var(--text-sec); margin: 0; font-size: 14px;">专属推特/X 。左侧浏览列表，右侧查看详情并进行管理，体验大气舒畅。</p>
                 <div style="display: flex; gap: 8px;">
                     <!-- Controls will be injected here if clustered -->
                     <button class="btn btn-success" id="categorizeTwitterBtn"

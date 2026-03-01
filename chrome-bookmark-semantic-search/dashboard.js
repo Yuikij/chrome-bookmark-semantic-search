@@ -409,72 +409,186 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (foldersArray.length === 0) {
                     indexViewEl.innerHTML = '<div style="color: #999; text-align: center; padding: 40px;">暂无书签数据</div>';
                 } else {
-                    foldersArray.forEach(([path, bookmarks]) => {
-                        const div = document.createElement('div');
-                        div.className = 'folder-item';
+                    // 构建文件夹树
+                    const folderTree = {};
+                    for (const [path, bookmarks] of foldersArray) {
+                        let parts = (path || '无分类').split(' > ').map(s => s.trim()).filter(Boolean);
+                        if (parts.length === 0) parts = ['无分类'];
 
-                        let bmsHtml = bookmarks.map(b => `
-                            <div class="bm-row" style="flex-direction: row; justify-content: space-between; align-items: center;">
-                                <div style="flex: 1; min-width: 0; cursor: pointer;" class="bm-detail-trigger" data-id="${b.id}" data-url="${escapeHtml(b.url)}" data-title="${escapeHtml(b.title || '无标题')}" data-date="${b.dateAdded || ''}" data-folder="${escapeHtml(path)}">
-                                    <div class="bm-title" style="color:var(--accent); font-weight:600;">${escapeHtml(b.title || '无标题')}</div>
-                                    <div class="bm-url">${escapeHtml(b.url)}</div>
-                                </div>
-                                <div style="display:flex; gap:6px; align-items:center;">
-                                    <button class="btn btn-danger btn-trash-bm" data-id="${b.id}" style="padding: 4px 8px; font-size:12px;">🗑️ 移入回收站</button>
-                                </div>
-                            </div>
-                        `).join('');
-
-                        div.innerHTML = `
-                            <div class="folder-title" style="border-left: 3px solid transparent; transition: 0.2s;">
-                                <span style="font-weight: 500;">📁 ${escapeHtml(path)}</span>
-                                <span class="folder-status">${bookmarks.length} 条</span>
-                            </div>
-                            <div class="folder-content" style="display: none;">
-                                ${bmsHtml}
-                            </div>
-                        `;
-
-                        const contentDiv = div.querySelector('.folder-content');
-                        if (contentDiv) {
-                            contentDiv.originalParent = div;
-                            div._myContentDiv = contentDiv;
+                        let current = folderTree;
+                        for (let i = 0; i < parts.length; i++) {
+                            const part = parts[i];
+                            if (!current[part]) {
+                                current[part] = { _bookmarks: [], _path: parts.slice(0, i + 1).join(' > '), _children: {} };
+                            }
+                            if (i === parts.length - 1) {
+                                current[part]._bookmarks = bookmarks; // 末端节点挂载书签
+                            }
+                            current = current[part]._children;
                         }
+                    }
 
-                        // 点击展开折叠到右侧面板
-                        div.querySelector('.folder-title').addEventListener('click', function (e) {
-                            // 移除所有的高亮
-                            document.querySelectorAll('#indexView .folder-title').forEach(el => {
-                                el.style.background = '';
-                                el.style.borderLeftColor = 'transparent';
-                            });
-                            // 当前项高亮
-                            this.style.background = 'var(--bg-active)';
-                            this.style.borderLeftColor = 'var(--accent)';
+                    // 递归渲染树
+                    function createTreeNodes(nodeDict, depth, parentEl) {
+                        const keys = Object.keys(nodeDict).sort();
+                        keys.forEach(key => {
+                            const node = nodeDict[key];
+                            const hasBms = node._bookmarks && node._bookmarks.length > 0;
+                            const bmsCount = hasBms ? node._bookmarks.length : 0;
+                            const hasChildren = Object.keys(node._children).length > 0;
 
-                            // 隐藏所有右侧内容并送回原处
-                            if (folderContentPane) {
-                                if (folderContentEmpty) folderContentEmpty.style.display = 'none';
+                            const nodeWrap = document.createElement('div');
+                            nodeWrap.className = 'folder-item tree-node-wrap';
 
-                                Array.from(folderContentPane.children).forEach(child => {
-                                    if (child.id !== 'folderContentEmpty' && child.classList.contains('folder-content')) {
-                                        child.style.display = 'none';
-                                        if (child.originalParent) {
-                                            child.originalParent.appendChild(child);
-                                        }
-                                    }
+                            // 标题行
+                            const titleRow = document.createElement('div');
+                            titleRow.className = 'folder-title tree-title';
+                            // 限制最大缩进宽度（避免层级太深 UI 崩溃）
+                            const indent = Math.min(depth * 14, 60);
+                            titleRow.style.paddingLeft = (16 + indent) + 'px';
+                            titleRow.style.borderLeft = '3px solid transparent';
+                            titleRow.style.transition = '0.2s';
+                            titleRow.style.display = 'flex';
+                            titleRow.style.alignItems = 'center';
+
+                            // 展开/折叠箭头
+                            const caret = document.createElement('span');
+                            caret.className = 'tree-caret';
+                            caret.style.width = '14px';
+                            caret.style.display = 'inline-block';
+                            caret.style.textAlign = 'center';
+                            caret.style.marginRight = '4px';
+                            caret.style.cursor = 'pointer';
+                            caret.style.fontSize = '12px';
+                            caret.style.transition = 'transform 0.2s';
+
+                            if (hasChildren) {
+                                caret.innerText = '▶';
+                            } else {
+                                caret.innerText = '•';
+                                caret.style.opacity = '0'; // 占位保持对齐
+                            }
+
+                            // 名称
+                            const nameSpan = document.createElement('span');
+                            nameSpan.style.fontWeight = '500';
+                            nameSpan.style.flex = '1';
+                            nameSpan.style.whiteSpace = 'nowrap';
+                            nameSpan.style.overflow = 'hidden';
+                            nameSpan.style.textOverflow = 'ellipsis';
+                            nameSpan.innerHTML = `📁 ${escapeHtml(key)}`;
+                            nameSpan.title = node._path;
+
+                            // 数量
+                            const statusSpan = document.createElement('span');
+                            statusSpan.className = 'folder-status';
+                            if (bmsCount > 0) {
+                                statusSpan.innerText = `${bmsCount} 条`;
+                            } else {
+                                statusSpan.style.display = 'none';
+                            }
+
+                            titleRow.appendChild(caret);
+                            titleRow.appendChild(nameSpan);
+                            titleRow.appendChild(statusSpan);
+
+                            nodeWrap.appendChild(titleRow);
+
+                            // 子文件夹容器
+                            const childrenContainer = document.createElement('div');
+                            childrenContainer.className = 'tree-children';
+                            if (hasChildren) {
+                                nodeWrap.appendChild(childrenContainer);
+                                createTreeNodes(node._children, depth + 1, childrenContainer);
+
+                                // 默认打开
+                                childrenContainer.style.display = 'block';
+                                caret.style.transform = 'rotate(90deg)';
+
+                                caret.addEventListener('click', (e) => {
+                                    e.stopPropagation();
+                                    const isHidden = childrenContainer.style.display === 'none';
+                                    childrenContainer.style.display = isHidden ? 'block' : 'none';
+                                    caret.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+                                });
+                                // 双击标题栏也可以展开/折叠
+                                titleRow.addEventListener('dblclick', (e) => {
+                                    const isHidden = childrenContainer.style.display === 'none';
+                                    childrenContainer.style.display = isHidden ? 'block' : 'none';
+                                    caret.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+                                });
+                            }
+
+                            // 书签内容
+                            if (hasBms) {
+                                const bmsHtml = node._bookmarks.map(b => `
+                                    <div class="bm-row" style="flex-direction: row; justify-content: space-between; align-items: center;">
+                                        <div style="flex: 1; min-width: 0; cursor: pointer;" class="bm-detail-trigger" data-id="${b.id}" data-url="${escapeHtml(b.url)}" data-title="${escapeHtml(b.title || '无标题')}" data-folder="${escapeHtml(node._path)}">
+                                            <div class="bm-title" style="color:var(--accent); font-weight:600;">${escapeHtml(b.title || '无标题')}</div>
+                                            <div class="bm-url">${escapeHtml(b.url)}</div>
+                                        </div>
+                                        <div style="display:flex; gap:6px; align-items:center;">
+                                            <button class="btn btn-danger btn-trash-bm" data-id="${b.id}" style="padding: 4px 8px; font-size:12px;">🗑️ 移入回收站</button>
+                                        </div>
+                                    </div>
+                                `).join('');
+
+                                const contentDiv = document.createElement('div');
+                                contentDiv.className = 'folder-content';
+                                contentDiv.style.display = 'none';
+                                contentDiv.innerHTML = bmsHtml;
+                                contentDiv.originalParent = nodeWrap;
+                                nodeWrap._myContentDiv = contentDiv;
+                                nodeWrap.appendChild(contentDiv);
+                            }
+
+                            // 点击标题，在右侧面板展示内容
+                            titleRow.addEventListener('click', function (e) {
+                                // 移除所有的高亮
+                                document.querySelectorAll('#indexView .tree-title').forEach(el => {
+                                    el.style.background = '';
+                                    el.style.borderLeftColor = 'transparent';
                                 });
 
-                                // 将当前分类的内容送入右侧面板
-                                if (div._myContentDiv) {
-                                    div._myContentDiv.style.display = 'block';
-                                    folderContentPane.appendChild(div._myContentDiv);
-                                }
-                            }
-                        });
+                                this.style.background = 'var(--bg-active)';
+                                this.style.borderLeftColor = 'var(--accent)';
 
-                        indexViewEl.appendChild(div);
-                    });
+                                const folderContentPane = document.getElementById('folderContentPane');
+                                const folderContentEmpty = document.getElementById('folderContentEmpty');
+
+                                if (folderContentPane) {
+                                    if (hasBms) {
+                                        if (folderContentEmpty) folderContentEmpty.style.display = 'none';
+                                    } else {
+                                        if (folderContentEmpty) {
+                                            folderContentEmpty.style.display = 'flex';
+                                            folderContentEmpty.innerHTML = `<div style="font-size: 40px; margin-bottom: 16px;">📂</div><div>该分类下暂无直接书签记录（可能在子分类中）</div>`;
+                                        }
+                                    }
+
+                                    // 隐藏已有的内容并归还原始父节点
+                                    Array.from(folderContentPane.children).forEach(child => {
+                                        if (child.id !== 'folderContentEmpty' && child.classList.contains('folder-content')) {
+                                            child.style.display = 'none';
+                                            if (child.originalParent) {
+                                                child.originalParent.appendChild(child);
+                                            }
+                                        }
+                                    });
+
+                                    // 移动当前内容过去
+                                    if (hasBms && nodeWrap._myContentDiv) {
+                                        nodeWrap._myContentDiv.style.display = 'block';
+                                        folderContentPane.appendChild(nodeWrap._myContentDiv);
+                                    }
+                                }
+                            });
+
+                            parentEl.appendChild(nodeWrap);
+                        });
+                    }
+
+                    createTreeNodes(folderTree, 0, indexViewEl);
                 }
             }
 
